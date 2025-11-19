@@ -1,23 +1,29 @@
 import 'package:dio/dio.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../storage/secure_storage_service.dart';
 
 class ApiClient {
   final Dio dio;
-  static const String _baseUrl = 'http://192.168.1.15:3000';
 
   ApiClient()
       : dio = Dio(BaseOptions(
-    baseUrl: _baseUrl,
-    connectTimeout: const Duration(milliseconds: 5000),
-    receiveTimeout: const Duration(milliseconds: 5000),
+    // Bỏ 'static', đọc trực tiếp từ dotenv khi khởi tạo class
+    baseUrl: dotenv.env['API_BASE_URL'] ?? 'http://localhost:3000',
+    connectTimeout: const Duration(seconds: 60),
+    receiveTimeout: const Duration(seconds: 60),
   )) {
-    // 🚀 THÊM INTERCEPTOR ĐỂ ĐÍNH KÈM JWT
+
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
-          final token = await SecureStorageService().getToken(); // Lấy token
-          if (token != null) {
-            options.headers['Authorization'] = 'Bearer $token'; // Thêm header
+          try {
+            final token = await SecureStorageService().getToken();
+            if (token != null && token.isNotEmpty) {
+              options.headers['Authorization'] = 'Bearer $token';
+            }
+          } catch (e) {
+            // Xử lý lỗi nếu việc lấy token thất bại (tùy chọn)
+            print('Error getting token: $e');
           }
           return handler.next(options);
         },

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "469419393040",
+    "project_id": "green-aqi-navigator",
+    "storage_bucket": "green-aqi-navigator.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:469419393040:android:fcd1a646afe6facbfc4a95",
+        "android_client_info": {
+          "package_name": "com.example.frontend_citizen"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAqlOoc60vMKO4-7t0kjE_nbVZkKOYxzVU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
