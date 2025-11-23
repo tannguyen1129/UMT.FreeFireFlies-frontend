@@ -28,4 +28,28 @@ class ProfileService {
       throw Exception('Đã xảy ra lỗi không xác định: $e');
     }
   }
+
+  Future<void> updateProfile({
+    String? fullName,
+    String? phoneNumber,
+    String? agency,
+  }) async {
+    try {
+      final response = await _apiClient.dio.put(
+        '/users/me',
+        data: {
+          'full_name': fullName,
+          'phone_number': phoneNumber,
+          'agency_department': agency,
+        },
+      );
+
+      if (response.statusCode != 200) {
+        throw Exception('Cập nhật thất bại');
+      }
+    } on DioException catch (e) {
+      throw Exception(e.response?.data['message'] ?? 'Lỗi kết nối');
+    }
+  }
+
 }

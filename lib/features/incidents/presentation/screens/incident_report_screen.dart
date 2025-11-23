@@ -1,7 +1,13 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import '../../services/incident_service.dart'; // 👈 Sửa: Import service
+import 'package:geolocator/geolocator.dart';
+import 'package:image_picker/image_picker.dart';
+
+// Import các service
+import '../../services/incident_service.dart';
+import '../../../map/services/geocoding_service.dart';
 
 class IncidentReportScreen extends StatefulWidget {
   final LatLng initialCenter;
@@ -13,98 +19,178 @@ class IncidentReportScreen extends StatefulWidget {
 }
 
 class _IncidentReportScreenState extends State<IncidentReportScreen> {
+  // Services & Controllers
   final IncidentService _incidentService = IncidentService();
-  final _descriptionController = TextEditingController();
+  final GeocodingService _geocodingService = GeocodingService();
+  final TextEditingController _descriptionController = TextEditingController();
+  final TextEditingController _addressController = TextEditingController(); // 👈 Controller địa chỉ
   final MapController _mapController = MapController();
+  final ImagePicker _picker = ImagePicker();
 
+  // State Variables
   LatLng? _incidentLocation;
   bool _isLoading = false;
-
-  // 🚀 BIẾN TRẠNG THÁI MỚI CHO DROPDOWN
   late Future<List<dynamic>> _incidentTypesFuture;
-  int? _selectedIncidentTypeId; // ID của loại sự cố đã chọn
+  int? _selectedIncidentTypeId;
+  List<XFile> _selectedImages = []; // 👈 Danh sách ảnh đã chọn
 
   @override
   void initState() {
     super.initState();
     _incidentLocation = widget.initialCenter;
-    // 🚀 Tải danh sách loại sự cố khi màn hình mở ra
     _incidentTypesFuture = _incidentService.getIncidentTypes();
-  }
 
-  void _handleMapTap(LatLng tapPosition) {
-    setState(() {
-      _incidentLocation = tapPosition;
-    });
-  }
-
-  Future<void> _submitReport() async {
-    if (_incidentLocation == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng chọn vị trí sự cố trên bản đồ')),
-      );
-      return;
-    }
-
-    // 🚀 SỬA LỖI: Bắt buộc chọn loại sự cố
-    if (_selectedIncidentTypeId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng chọn loại sự cố')),
-      );
-      return;
-    }
-
-    setState(() { _isLoading = true; });
-
-    print('--- (FLUTTER) Bắt đầu gửi báo cáo...');
-    print('--- (FLUTTER) Vị trí: ${_incidentLocation.toString()}');
-    print('--- (FLUTTER) Loại ID: $_selectedIncidentTypeId');
-
-    try {
-      await _incidentService.createIncident(
-        location: _incidentLocation!,
-        incidentTypeId: _selectedIncidentTypeId!, // 👈 Gửi ID đã chọn
-        description: _descriptionController.text,
-      );
-
-      print('--- (FLUTTER) Gửi báo cáo THÀNH CÔNG!');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Báo cáo sự cố thành công!')),
-      );
-      Navigator.of(context).pop();
-
-    } catch (e) {
-      print('--- (FLUTTER) GẶP LỖI: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Lỗi báo cáo: $e')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() { _isLoading = false; });
-      }
-    }
+    // Lấy địa chỉ ban đầu (nếu có thể - tùy chọn)
+    // _updateAddressText(_incidentLocation!);
   }
 
   @override
   void dispose() {
     _descriptionController.dispose();
+    _addressController.dispose();
     super.dispose();
+  }
+
+  // --- 📍 LOGIC VỊ TRÍ ---
+
+  // 1. Xử lý chạm vào bản đồ
+  void _handleMapTap(LatLng tapPosition) {
+    setState(() {
+      _incidentLocation = tapPosition;
+    });
+    // (Tùy chọn) Gọi Geocoding ngược để lấy tên đường từ tọa độ
+    // _updateAddressText(tapPosition);
+  }
+
+  // 2. Lấy vị trí GPS hiện tại
+  Future<void> _useCurrentLocation() async {
+    setState(() => _isLoading = true);
+    try {
+      // Kiểm tra quyền (giản lược vì HomeScreen đã làm kỹ rồi)
+      final position = await Geolocator.getCurrentPosition();
+      final latLng = LatLng(position.latitude, position.longitude);
+
+      setState(() {
+        _incidentLocation = latLng;
+        _mapController.move(latLng, 16.0);
+      });
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã cập nhật vị trí hiện tại')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi GPS: $e')));
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // 3. Tìm vị trí từ địa chỉ nhập vào
+  Future<void> _searchAddress() async {
+    final address = _addressController.text;
+    if (address.isEmpty) return;
+
+    setState(() => _isLoading = true);
+    try {
+      final latLng = await _geocodingService.getCoordinatesFromAddress(address);
+      if (latLng != null) {
+        setState(() {
+          _incidentLocation = latLng;
+          _mapController.move(latLng, 16.0);
+        });
+        FocusScope.of(context).unfocus(); // Ẩn bàn phím
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Không tìm thấy địa chỉ này.')));
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi tìm kiếm: $e')));
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // --- 📸 LOGIC ẢNH ---
+
+  // Chọn nhiều ảnh
+  Future<void> _pickImages() async {
+    try {
+      final List<XFile> images = await _picker.pickMultiImage();
+      if (images.isNotEmpty) {
+        setState(() {
+          _selectedImages.addAll(images);
+        });
+      }
+    } catch (e) {
+      print('Lỗi chọn ảnh: $e');
+    }
+  }
+
+  // Chụp 1 ảnh từ Camera
+  Future<void> _takePhoto() async {
+    try {
+      final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
+      if (photo != null) {
+        setState(() {
+          _selectedImages.add(photo);
+        });
+      }
+    } catch (e) {
+      print('Lỗi chụp ảnh: $e');
+    }
+  }
+
+  void _removeImage(int index) {
+    setState(() {
+      _selectedImages.removeAt(index);
+    });
+  }
+
+  // --- 🚀 LOGIC GỬI BÁO CÁO ---
+
+  Future<void> _submitReport() async {
+    if (_incidentLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn vị trí.')));
+      return;
+    }
+    if (_selectedIncidentTypeId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn loại sự cố.')));
+      return;
+    }
+
+    setState(() { _isLoading = true; });
+
+    try {
+      // TODO: Upload ảnh lên server trước để lấy URL (Hiện tại demo gửi text list ảnh)
+      // Trong thực tế, bạn cần upload từng file trong _selectedImages lên Cloudinary/S3/Server của bạn
+      // sau đó lấy về danh sách URL chuỗi để gửi vào API createIncident.
+
+      String imageUrls = _selectedImages.isNotEmpty
+          ? "User selected ${_selectedImages.length} images (Upload logic pending)"
+          : "";
+
+      await _incidentService.createIncident(
+        location: _incidentLocation!,
+        incidentTypeId: _selectedIncidentTypeId!,
+        description: _descriptionController.text,
+        imageUrl: imageUrls, // Gửi URL ảnh (hoặc chuỗi mô tả tạm thời)
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Báo cáo thành công!')));
+      Navigator.of(context).pop();
+
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+    } finally {
+      if (mounted) setState(() { _isLoading = false; });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Báo cáo Sự cố Mới'),
+        title: const Text('Báo cáo Sự cố'),
         actions: [
-          if (_isLoading)
-            const Padding(
-              padding: EdgeInsets.all(16.0),
-              child: CircularProgressIndicator(color: Colors.white),
-            )
-          else
+          if (!_isLoading)
             IconButton(
               icon: const Icon(Icons.send),
               onPressed: _submitReport,
@@ -112,102 +198,161 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
             ),
         ],
       ),
-      body: Column(
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
         children: [
-          // 1. BẢN ĐỒ (chiếm 40% màn hình)
+          // --- PHẦN 1: BẢN ĐỒ & CHỌN VỊ TRÍ (45%) ---
           Expanded(
-            flex: 4, // 40%
-            child: FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: widget.initialCenter,
-                initialZoom: 16.0,
-                onTap: (tapPosition, point) => _handleMapTap(point),
-              ),
+            flex: 45,
+            child: Stack(
               children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                ),
-                if (_incidentLocation != null)
-                  MarkerLayer(
-                    markers: [
-                      Marker(
-                        point: _incidentLocation!,
-                        child: const Icon(Icons.warning, color: Colors.red, size: 40.0),
-                      )
-                    ],
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: widget.initialCenter,
+                    initialZoom: 16.0,
+                    onTap: (_, point) => _handleMapTap(point),
                   ),
+                  children: [
+                    TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
+                    if (_incidentLocation != null)
+                      MarkerLayer(markers: [
+                        Marker(
+                          point: _incidentLocation!,
+                          child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                        )
+                      ]),
+                  ],
+                ),
+                // Thanh tìm kiếm địa chỉ nằm trên bản đồ
+                Positioned(
+                  top: 10, left: 10, right: 10,
+                  child: Card(
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                            child: TextField(
+                              controller: _addressController,
+                              decoration: const InputDecoration(
+                                hintText: 'Nhập địa chỉ hoặc tìm kiếm...',
+                                border: InputBorder.none,
+                              ),
+                              onSubmitted: (_) => _searchAddress(),
+                            ),
+                          ),
+                        ),
+                        IconButton(icon: const Icon(Icons.search), onPressed: _searchAddress),
+                        IconButton(icon: const Icon(Icons.my_location), onPressed: _useCurrentLocation),
+                      ],
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
 
-          // 2. FORM NHẬP LIỆU (chiếm 60% màn hình)
+          // --- PHẦN 2: FORM NHẬP LIỆU (55%) ---
           Expanded(
-            flex: 6, // 60%
-            child: Padding(
+            flex: 55,
+            child: ListView(
               padding: const EdgeInsets.all(16.0),
-              child: ListView(
-                children: [
-                  Text(
-                    'Chạm vào bản đồ để chọn vị trí sự cố.',
-                    style: Theme.of(context).textTheme.titleMedium,
-                    textAlign: TextAlign.center,
+              children: [
+                const Text('Chi tiết sự cố', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+
+                // Dropdown Loại sự cố
+                FutureBuilder<List<dynamic>>(
+                  future: _incidentTypesFuture,
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData) return const LinearProgressIndicator();
+                    return DropdownButtonFormField<int>(
+                      value: _selectedIncidentTypeId,
+                      hint: const Text('Chọn loại sự cố'),
+                      decoration: const InputDecoration(border: OutlineInputBorder(), prefixIcon: Icon(Icons.category)),
+                      items: snapshot.data!.map((type) => DropdownMenuItem<int>(
+                        value: type['type_id'],
+                        child: Text(type['type_name']),
+                      )).toList(),
+                      onChanged: (v) => setState(() => _selectedIncidentTypeId = v),
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+
+                // Input Mô tả
+                TextField(
+                  controller: _descriptionController,
+                  decoration: const InputDecoration(
+                    labelText: 'Mô tả chi tiết',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.description),
+                    alignLabelWithHint: true,
                   ),
-                  const SizedBox(height: 20),
+                  maxLines: 3,
+                ),
+                const SizedBox(height: 20),
 
-                  // 🚀 SỬA LỖI: DÙNG FutureBuilder ĐỂ TẢI VÀ HIỂN THỊ DROPDOWN
-                  FutureBuilder<List<dynamic>>(
-                    future: _incidentTypesFuture,
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (snapshot.hasError) {
-                        return Center(child: Text('Lỗi tải loại sự cố: ${snapshot.error}'));
-                      }
-                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                        return const Center(child: Text('Không tìm thấy loại sự cố.'));
-                      }
+                // --- KHU VỰC CHỌN ẢNH ---
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Hình ảnh đính kèm:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    Row(
+                      children: [
+                        IconButton(onPressed: _takePhoto, icon: const Icon(Icons.camera_alt), tooltip: 'Chụp ảnh'),
+                        IconButton(onPressed: _pickImages, icon: const Icon(Icons.photo_library), tooltip: 'Chọn từ thư viện'),
+                      ],
+                    )
+                  ],
+                ),
 
-                      // Dữ liệu (danh sách các loại sự cố)
-                      final types = snapshot.data!;
-
-                      return DropdownButtonFormField<int>(
-                        value: _selectedIncidentTypeId,
-                        hint: const Text('Chọn loại sự cố...'),
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          icon: Icon(Icons.category),
-                        ),
-                        items: types.map((type) {
-                          return DropdownMenuItem<int>(
-                            value: type['type_id'], // 👈 ID
-                            child: Text(type['type_name']), // 👈 Tên
-                          );
-                        }).toList(),
-                        onChanged: (newValue) {
-                          setState(() {
-                            _selectedIncidentTypeId = newValue;
-                          });
-                        },
-                        validator: (value) => value == null ? 'Vui lòng chọn loại sự cố' : null,
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: _descriptionController,
-                    decoration: const InputDecoration(
-                      labelText: 'Mô tả (Tùy chọn)',
-                      border: OutlineInputBorder(),
-                      icon: Icon(Icons.description),
+                // Hiển thị danh sách ảnh đã chọn
+                if (_selectedImages.isNotEmpty)
+                  SizedBox(
+                    height: 100,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _selectedImages.length,
+                      itemBuilder: (context, index) {
+                        return Stack(
+                          children: [
+                            Container(
+                              margin: const EdgeInsets.only(right: 8),
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(8),
+                                image: DecorationImage(
+                                  image: FileImage(File(_selectedImages[index].path)),
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              top: 0, right: 8,
+                              child: GestureDetector(
+                                onTap: () => _removeImage(index),
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                                  child: const Icon(Icons.close, size: 16, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
-                    maxLines: 3,
+                  )
+                else
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 20),
+                    child: Center(child: Text('Chưa có ảnh nào được chọn', style: TextStyle(color: Colors.grey))),
                   ),
-                  const SizedBox(height: 20),
-                ],
-              ),
+              ],
             ),
           ),
         ],

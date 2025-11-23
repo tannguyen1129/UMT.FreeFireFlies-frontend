@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/profile_service.dart';
+import 'edit_profile_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({Key? key}) : super(key: key);
@@ -10,7 +11,6 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveClientMixin {
 
-  // Giữ trạng thái khi chuyển tab
   @override
   bool get wantKeepAlive => true;
 
@@ -23,7 +23,7 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     _profileFuture = _profileService.getMyProfile();
   }
 
-  // Helper để hiển thị Roles (Quyền)
+  // Helper để hiển thị Roles
   String _formatRoles(List<dynamic> roles) {
     return roles.map((role) => role['role_name']).join(', ');
   }
@@ -35,88 +35,125 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
     return FutureBuilder<Map<String, dynamic>>(
       future: _profileFuture,
       builder: (context, snapshot) {
-        // 1. Trạng thái Đang tải
+
+        // 1. Đang tải
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
-        // 2. Trạng thái Lỗi
+        // 2. Lỗi
         if (snapshot.hasError) {
-          return Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Text(
-                'Lỗi tải hồ sơ:\n${snapshot.error}',
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.red),
+          return Scaffold(
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Text(
+                  'Lỗi tải hồ sơ:\n${snapshot.error}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.red),
+                ),
               ),
             ),
           );
         }
 
-        // 3. Trạng thái Không có dữ liệu
+        // 3. Không có dữ liệu
         if (!snapshot.hasData) {
-          return const Center(child: Text('Không tìm thấy dữ liệu hồ sơ.'));
+          return const Scaffold(
+            body: Center(child: Text('Không tìm thấy dữ liệu hồ sơ.')),
+          );
         }
 
-        // 4. Trạng thái Thành công (Hiển thị dữ liệu)
+        // 4. Thành công -> Hiển thị giao diện chính
         final user = snapshot.data!;
 
-        return ListView(
-          padding: const EdgeInsets.all(16.0),
-          children: [
-            // Ảnh đại diện (Avatar)
-            const Center(
-              child: CircleAvatar(
-                radius: 50,
-                backgroundColor: Colors.green,
-                child: Icon(Icons.person, size: 50, color: Colors.white),
-              ),
-            ),
-            const SizedBox(height: 16),
+        return Scaffold(
+          appBar: AppBar(
+            title: const Text('Hồ sơ Cá nhân'),
+            centerTitle: true,
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.edit),
+                tooltip: 'Chỉnh sửa thông tin',
+                onPressed: () async {
+                  // Chuyển sang màn hình sửa
+                  final result = await Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (context) => EditProfileScreen(userData: user)
+                    ),
+                  );
 
-            // Tên đầy đủ
-            Text(
-              user['full_name'] ?? 'Chưa cập nhật tên',
-              textAlign: TextAlign.center,
-              style: Theme.of(context).textTheme.headlineSmall,
-            ),
-            const SizedBox(height: 8),
-
-            // Quyền (Roles)
-            Center(
-              child: Chip(
-                label: Text(_formatRoles(user['roles'] ?? [])),
-                backgroundColor: Colors.green.shade100,
+                  // Nếu sửa thành công (trả về true), reload lại profile
+                  if (result == true) {
+                    setState(() {
+                      _profileFuture = _profileService.getMyProfile();
+                    });
+                  }
+                },
+              )
+            ],
+          ),
+          body: ListView(
+            padding: const EdgeInsets.all(16.0),
+            children: [
+              // Ảnh đại diện (Avatar)
+              const Center(
+                child: CircleAvatar(
+                  radius: 50,
+                  backgroundColor: Colors.green,
+                  child: Icon(Icons.person, size: 50, color: Colors.white),
+                ),
               ),
-            ),
-            const Divider(height: 32),
+              const SizedBox(height: 16),
 
-            // Thông tin chi tiết
-            Card(
-              elevation: 0,
-              color: Theme.of(context).colorScheme.surfaceVariant,
-              child: Column(
-                children: [
-                  ListTile(
-                    leading: const Icon(Icons.email),
-                    title: const Text('Email'),
-                    subtitle: Text(user['email'] ?? '...'),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.phone),
-                    title: const Text('Số điện thoại'),
-                    subtitle: Text(user['phone_number'] ?? 'Chưa cập nhật'),
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.apartment),
-                    title: const Text('Cơ quan (Nếu có)'),
-                    subtitle: Text(user['agency_department'] ?? 'Không có'),
-                  ),
-                ],
+              // Tên đầy đủ
+              Text(
+                user['full_name'] ?? 'Chưa cập nhật tên',
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
               ),
-            ),
-          ],
+              const SizedBox(height: 8),
+
+              // Quyền (Roles)
+              Center(
+                child: Chip(
+                  label: Text(_formatRoles(user['roles'] ?? [])),
+                  backgroundColor: Colors.green.shade100,
+                ),
+              ),
+              const Divider(height: 32),
+
+              // Thông tin chi tiết
+              Card(
+                elevation: 2,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.email, color: Colors.blue),
+                      title: const Text('Email'),
+                      subtitle: Text(user['email'] ?? '...'),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.phone, color: Colors.green),
+                      title: const Text('Số điện thoại'),
+                      subtitle: Text(user['phone_number'] ?? 'Chưa cập nhật'),
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.apartment, color: Colors.orange),
+                      title: const Text('Cơ quan/Đơn vị'),
+                      subtitle: Text(user['agency_department'] ?? 'Không có'),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         );
       },
     );
