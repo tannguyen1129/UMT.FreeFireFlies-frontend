@@ -5,9 +5,8 @@ import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 
-// Import các service
+// Services
 import '../../services/incident_service.dart';
-import '../../../map/services/geocoding_service.dart';
 
 class IncidentReportScreen extends StatefulWidget {
   final LatLng initialCenter;
@@ -21,52 +20,53 @@ class IncidentReportScreen extends StatefulWidget {
 class _IncidentReportScreenState extends State<IncidentReportScreen> {
   // Services & Controllers
   final IncidentService _incidentService = IncidentService();
-  final GeocodingService _geocodingService = GeocodingService();
   final TextEditingController _descriptionController = TextEditingController();
-  final TextEditingController _addressController = TextEditingController(); // 👈 Controller địa chỉ
   final MapController _mapController = MapController();
   final ImagePicker _picker = ImagePicker();
 
   // State Variables
   LatLng? _incidentLocation;
   bool _isLoading = false;
+
   late Future<List<dynamic>> _incidentTypesFuture;
   int? _selectedIncidentTypeId;
-  List<XFile> _selectedImages = []; // 👈 Danh sách ảnh đã chọn
+
+  // Danh sách ảnh đã chọn (Local)
+  List<XFile> _selectedImages = [];
 
   @override
   void initState() {
     super.initState();
     _incidentLocation = widget.initialCenter;
     _incidentTypesFuture = _incidentService.getIncidentTypes();
-
-    // Lấy địa chỉ ban đầu (nếu có thể - tùy chọn)
-    // _updateAddressText(_incidentLocation!);
   }
 
   @override
   void dispose() {
     _descriptionController.dispose();
-    _addressController.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
   // --- 📍 LOGIC VỊ TRÍ ---
-
-  // 1. Xử lý chạm vào bản đồ
   void _handleMapTap(LatLng tapPosition) {
     setState(() {
       _incidentLocation = tapPosition;
     });
-    // (Tùy chọn) Gọi Geocoding ngược để lấy tên đường từ tọa độ
-    // _updateAddressText(tapPosition);
   }
 
-  // 2. Lấy vị trí GPS hiện tại
   Future<void> _useCurrentLocation() async {
     setState(() => _isLoading = true);
     try {
-      // Kiểm tra quyền (giản lược vì HomeScreen đã làm kỹ rồi)
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) throw Exception('GPS chưa bật');
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) throw Exception('Quyền GPS bị từ chối');
+      }
+
       final position = await Geolocator.getCurrentPosition();
       final latLng = LatLng(position.latitude, position.longitude);
 
@@ -74,41 +74,15 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
         _incidentLocation = latLng;
         _mapController.move(latLng, 16.0);
       });
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đã cập nhật vị trí hiện tại')));
+      _showSnack('Đã cập nhật vị trí hiện tại');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi GPS: $e')));
-    } finally {
-      setState(() => _isLoading = false);
-    }
-  }
-
-  // 3. Tìm vị trí từ địa chỉ nhập vào
-  Future<void> _searchAddress() async {
-    final address = _addressController.text;
-    if (address.isEmpty) return;
-
-    setState(() => _isLoading = true);
-    try {
-      final latLng = await _geocodingService.getCoordinatesFromAddress(address);
-      if (latLng != null) {
-        setState(() {
-          _incidentLocation = latLng;
-          _mapController.move(latLng, 16.0);
-        });
-        FocusScope.of(context).unfocus(); // Ẩn bàn phím
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Không tìm thấy địa chỉ này.')));
-      }
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi tìm kiếm: $e')));
+      _showSnack('Lỗi GPS: $e');
     } finally {
       setState(() => _isLoading = false);
     }
   }
 
   // --- 📸 LOGIC ẢNH ---
-
-  // Chọn nhiều ảnh
   Future<void> _pickImages() async {
     try {
       final List<XFile> images = await _picker.pickMultiImage();
@@ -122,7 +96,6 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
     }
   }
 
-  // Chụp 1 ảnh từ Camera
   Future<void> _takePhoto() async {
     try {
       final XFile? photo = await _picker.pickImage(source: ImageSource.camera);
@@ -143,47 +116,55 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
   }
 
   // --- 🚀 LOGIC GỬI BÁO CÁO ---
-
   Future<void> _submitReport() async {
     if (_incidentLocation == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn vị trí.')));
+      _showSnack('Vui lòng chọn vị trí trên bản đồ.');
       return;
     }
     if (_selectedIncidentTypeId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn loại sự cố.')));
+      _showSnack('Vui lòng chọn loại sự cố.');
       return;
     }
 
     setState(() { _isLoading = true; });
 
     try {
-      // TODO: Upload ảnh lên server trước để lấy URL (Hiện tại demo gửi text list ảnh)
-      // Trong thực tế, bạn cần upload từng file trong _selectedImages lên Cloudinary/S3/Server của bạn
-      // sau đó lấy về danh sách URL chuỗi để gửi vào API createIncident.
+      // 1. Upload ảnh (Nếu có)
+      String? uploadedImageUrl;
 
-      String imageUrls = _selectedImages.isNotEmpty
-          ? "User selected ${_selectedImages.length} images (Upload logic pending)"
-          : "";
+      if (_selectedImages.isNotEmpty) {
+        // Hiện tại Backend chỉ lưu 1 URL ảnh, nên ta lấy ảnh đầu tiên
+        // Hoặc bạn có thể upload hết và nối chuỗi, tùy logic backend
+        File imageFile = File(_selectedImages.first.path);
+        uploadedImageUrl = await _incidentService.uploadImage(imageFile);
+      }
 
+      // 2. Gửi báo cáo kèm URL ảnh
       await _incidentService.createIncident(
         location: _incidentLocation!,
         incidentTypeId: _selectedIncidentTypeId!,
         description: _descriptionController.text,
-        imageUrl: imageUrls, // Gửi URL ảnh (hoặc chuỗi mô tả tạm thời)
+        imageUrl: uploadedImageUrl,
       );
 
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Báo cáo thành công!')));
-      Navigator.of(context).pop();
+      Navigator.of(context).pop(); // Đóng màn hình
 
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+      _showSnack('Lỗi: $e');
     } finally {
       if (mounted) setState(() { _isLoading = false; });
     }
   }
 
+  void _showSnack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  // --- UI ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -202,9 +183,9 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
         children: [
-          // --- PHẦN 1: BẢN ĐỒ & CHỌN VỊ TRÍ (45%) ---
+          // 1. BẢN ĐỒ (Phần trên)
           Expanded(
-            flex: 45,
+            flex: 4,
             child: Stack(
               children: [
                 FlutterMap(
@@ -220,47 +201,31 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
                       MarkerLayer(markers: [
                         Marker(
                           point: _incidentLocation!,
+                          width: 40, height: 40,
                           child: const Icon(Icons.location_on, color: Colors.red, size: 40),
                         )
                       ]),
                   ],
                 ),
-                // Thanh tìm kiếm địa chỉ nằm trên bản đồ
                 Positioned(
-                  top: 10, left: 10, right: 10,
-                  child: Card(
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 8.0),
-                            child: TextField(
-                              controller: _addressController,
-                              decoration: const InputDecoration(
-                                hintText: 'Nhập địa chỉ hoặc tìm kiếm...',
-                                border: InputBorder.none,
-                              ),
-                              onSubmitted: (_) => _searchAddress(),
-                            ),
-                          ),
-                        ),
-                        IconButton(icon: const Icon(Icons.search), onPressed: _searchAddress),
-                        IconButton(icon: const Icon(Icons.my_location), onPressed: _useCurrentLocation),
-                      ],
-                    ),
+                  bottom: 10, right: 10,
+                  child: FloatingActionButton.small(
+                    onPressed: _useCurrentLocation,
+                    backgroundColor: Colors.white,
+                    child: const Icon(Icons.my_location, color: Colors.blue),
                   ),
                 ),
               ],
             ),
           ),
 
-          // --- PHẦN 2: FORM NHẬP LIỆU (55%) ---
+          // 2. FORM NHẬP LIỆU (Phần dưới)
           Expanded(
-            flex: 55,
+            flex: 6,
             child: ListView(
               padding: const EdgeInsets.all(16.0),
               children: [
-                const Text('Chi tiết sự cố', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Text('Thông tin chi tiết', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 10),
 
                 // Dropdown Loại sự cố
@@ -280,13 +245,13 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
                     );
                   },
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 15),
 
                 // Input Mô tả
                 TextField(
                   controller: _descriptionController,
                   decoration: const InputDecoration(
-                    labelText: 'Mô tả chi tiết',
+                    labelText: 'Mô tả thêm',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.description),
                     alignLabelWithHint: true,
@@ -295,21 +260,21 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // --- KHU VỰC CHỌN ẢNH ---
+                // Chọn ảnh
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Hình ảnh đính kèm:', style: TextStyle(fontWeight: FontWeight.bold)),
+                    const Text('Hình ảnh minh chứng:', style: TextStyle(fontWeight: FontWeight.bold)),
                     Row(
                       children: [
-                        IconButton(onPressed: _takePhoto, icon: const Icon(Icons.camera_alt), tooltip: 'Chụp ảnh'),
-                        IconButton(onPressed: _pickImages, icon: const Icon(Icons.photo_library), tooltip: 'Chọn từ thư viện'),
+                        IconButton(onPressed: _takePhoto, icon: const Icon(Icons.camera_alt, color: Colors.blue)),
+                        IconButton(onPressed: _pickImages, icon: const Icon(Icons.photo_library, color: Colors.green)),
                       ],
                     )
                   ],
                 ),
 
-                // Hiển thị danh sách ảnh đã chọn
+                // Hiển thị ảnh
                 if (_selectedImages.isNotEmpty)
                   SizedBox(
                     height: 100,
@@ -325,6 +290,7 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
                               height: 100,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.grey.shade300),
                                 image: DecorationImage(
                                   image: FileImage(File(_selectedImages[index].path)),
                                   fit: BoxFit.cover,
@@ -337,8 +303,8 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
                                 onTap: () => _removeImage(index),
                                 child: Container(
                                   padding: const EdgeInsets.all(2),
-                                  decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
-                                  child: const Icon(Icons.close, size: 16, color: Colors.white),
+                                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                                  child: const Icon(Icons.close, size: 18, color: Colors.red),
                                 ),
                               ),
                             ),
@@ -349,8 +315,8 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
                   )
                 else
                   const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 20),
-                    child: Center(child: Text('Chưa có ảnh nào được chọn', style: TextStyle(color: Colors.grey))),
+                    padding: EdgeInsets.all(10),
+                    child: Text('Chưa có ảnh nào.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
                   ),
               ],
             ),
