@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_state_provider.dart';
 import '../../services/auth_service.dart';
 import 'dart:async';
+import 'register_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -19,35 +20,28 @@ class _LoginScreenState extends State<LoginScreen> {
 
   final AuthService _authService = AuthService();
 
-  Future<void> _login(BuildContext context) async { // context từ Builder
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+  Future<void> _login(BuildContext context) async {
+    if (!_formKey.currentState!.validate()) return;
 
-    // 🚀 LƯU TRỮ TRẠNG THÁI TRƯỚC KHI AWAIT (AN TOÀN)
     final authProvider = Provider.of<AuthStateProvider>(context, listen: false);
-    final scaffoldMessenger = ScaffoldMessenger.of(this.context);
+    final scaffold = ScaffoldMessenger.of(this.context);
 
     if (mounted) {
-      setState(() {
-        _isLoading = true;
-      });
+      setState(() => _isLoading = true);
     }
 
     try {
-      final String token = await _authService.login(
-        _emailController.text,
-        _passwordController.text,
+      final token = await _authService.login(
+        _emailController.text.trim(),
+        _passwordController.text.trim(),
       );
 
-      // 1. KÍCH HOẠT PROVIDER (Điều hướng xảy ra ở đây)
       if (!mounted) return;
       authProvider.loginSuccess(token);
 
-      // 2. HIỂN THỊ SNACKBAR (Dùng biến đã lưu)
-      // Chạy sau khi build frame này hoàn tất (để SnackBar hiện trên HomeScreen)
+      // Hiển thị SnackBar sau khi điều hướng
       Future.microtask(() {
-        scaffoldMessenger.showSnackBar(
+        scaffold.showSnackBar(
           const SnackBar(content: Text('Đăng nhập thành công!')),
         );
       });
@@ -55,13 +49,9 @@ class _LoginScreenState extends State<LoginScreen> {
     } catch (e) {
       if (!mounted) return;
 
-      // 🚀 NẾU LỖI, HÃY TẮT LOADING VÀ HIỂN THỊ LỖI
-      setState(() {
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
 
-      // Dùng biến đã lưu để hiển thị lỗi
-      scaffoldMessenger.showSnackBar(
+      scaffold.showSnackBar(
         SnackBar(content: Text('Lỗi: $e')),
       );
     }
@@ -77,9 +67,7 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Đăng nhập Green-AQI'),
-      ),
+      appBar: AppBar(title: const Text('Đăng nhập Green-AQI')),
       body: Padding(
         padding: const EdgeInsets.all(20.0),
         child: Form(
@@ -87,7 +75,7 @@ class _LoginScreenState extends State<LoginScreen> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // ... (TextFormField Email và Password giữ nguyên)
+              // --- Email ---
               TextFormField(
                 controller: _emailController,
                 decoration: const InputDecoration(
@@ -103,7 +91,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   return null;
                 },
               ),
+
               const SizedBox(height: 16),
+
+              // --- Password ---
               TextFormField(
                 controller: _passwordController,
                 obscureText: true,
@@ -119,26 +110,40 @@ class _LoginScreenState extends State<LoginScreen> {
                   return null;
                 },
               ),
+
               const SizedBox(height: 24),
-              // --- Nút Đăng nhập ---
+
+              // --- Button Login ---
               _isLoading
                   ? const CircularProgressIndicator()
                   : Builder(
                 builder: (innerContext) => ElevatedButton(
-                  onPressed: () => _login(innerContext), // 👈 CHUYỂN INNER CONTEXT
+                  onPressed: () => _login(innerContext),
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(double.infinity, 50),
                   ),
                   child: const Text('Đăng nhập'),
                 ),
               ),
-              // ... (Nút Đăng ký giữ nguyên)
-              const SizedBox(height: 16),
-              TextButton(
-                onPressed: () {
-                  // TODO: Điều hướng sang màn hình Đăng ký
-                },
-                child: const Text('Chưa có tài khoản? Đăng ký ngay'),
+
+              const SizedBox(height: 20),
+
+              // --- Link Đăng ký ---
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text("Chưa có tài khoản?"),
+                  TextButton(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (context) => const RegisterScreen(),
+                        ),
+                      );
+                    },
+                    child: const Text("Đăng ký ngay"),
+                  ),
+                ],
               ),
             ],
           ),

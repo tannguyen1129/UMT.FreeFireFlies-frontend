@@ -1,3 +1,16 @@
+// 👇 THÊM KHỐI NÀY LÊN ĐẦU FILE
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        // Định nghĩa version plugin ở đây
+        classpath("com.google.gms:google-services:4.4.2")
+    }
+}
+
+// 👇 Phần còn lại giữ nguyên
 allprojects {
     repositories {
         google()
