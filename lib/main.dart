@@ -2,19 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // Đã import
+import 'package:flutter_dotenv/flutter_dotenv.dart'; // 👈 Import dotenv
 
 // Import các màn hình và provider
 import 'features/auth/presentation/providers/auth_state_provider.dart';
 import 'features/auth/presentation/screens/login_screen.dart';
 import 'navigation/navigation_shell.dart';
 
-// 🚀 HÀM XỬ LÝ TIN NHẮN KHI APP TẮT (BACKGROUND)
-// Phải để ở top-level (ngoài hàm main)
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Nếu cần dùng Firebase trong background handler thì phải init lại
   await Firebase.initializeApp();
-  print("🌙 Nhận thông báo ngầm: ${message.messageId}");
+  print("🌙 Nhận thông báo ngầm (Background): ${message.messageId}");
+  // Ở đây bạn có thể xử lý logic ngầm (ví dụ lưu local storage) nhưng không update UI được
 }
 
 void main() async {
@@ -22,11 +22,11 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    // 2. 🚀 FIX QUAN TRỌNG: Load file .env TRƯỚC KHI làm bất cứ gì khác
-    // (Để ApiClient có thể đọc được IP)
+    // (Để ApiClient có thể đọc được IP ngay khi app khởi động)
     await dotenv.load(fileName: ".env");
+    print("✅ Đã load .env thành công");
   } catch (e) {
-    print("⚠️ Không tìm thấy file .env (Hoặc lỗi load), sẽ dùng cấu hình mặc định.");
+    print("⚠️ Không tìm thấy file .env (Hoặc lỗi load), sẽ dùng cấu hình mặc định trong code.");
   }
 
   try {
@@ -36,7 +36,7 @@ void main() async {
     // Đăng ký hàm xử lý nền
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-    // 4. Xin quyền thông báo
+    // 4. Xin quyền thông báo (Cho Android 13+ và iOS)
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     NotificationSettings settings = await messaging.requestPermission(
       alert: true,
@@ -45,9 +45,18 @@ void main() async {
     );
     print('Quyền thông báo: ${settings.authorizationStatus}');
 
-    // 5. Đăng ký vào Topic chung
+    // 5. Đăng ký vào Topic chung (Để nhận cảnh báo từ Server)
     await messaging.subscribeToTopic('general_alerts');
     print("✅ Đã đăng ký nhận tin từ topic: general_alerts");
+
+    // 6. Lắng nghe tin nhắn khi đang mở App (Foreground) - Global Listener
+    // (Lưu ý: Để hiện UI đẹp, ta nên lắng nghe thêm ở từng màn hình như HomeScreen)
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('🔔 Nhận tin nhắn Foreground (Global): ${message.notification?.title}');
+      if (message.notification != null) {
+        print('Nội dung: ${message.notification?.body}');
+      }
+    });
 
   } catch (e) {
     print("❌ Lỗi khởi tạo Firebase: $e");
@@ -75,7 +84,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.green,
         visualDensity: VisualDensity.adaptivePlatformDensity,
-        useMaterial3: true,
+        useMaterial3: true, // Giao diện hiện đại hơn
       ),
       // Điều hướng dựa trên trạng thái đăng nhập
       home: authState.isAuthenticated

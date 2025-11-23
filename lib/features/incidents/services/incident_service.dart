@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:latlong2/latlong.dart';
 import '../../../core/api/api_client.dart';
@@ -5,48 +6,56 @@ import '../../../core/api/api_client.dart';
 class IncidentService {
   final ApiClient _apiClient = ApiClient();
 
-  // 🚀 HÀM MỚI: Lấy danh sách sự cố của TÔI
-  Future<List<dynamic>> getMyIncidents() async {
-    try {
-      // ⚠️ LƯU Ý: API NÀY CHƯA TỒN TẠI Ở BACKEND
-      // Chúng ta sẽ phải tạo (GET /aqi/incidents/me) ở bước sau
-      final response = await _apiClient.dio.get(
-        '/aqi/incidents/me', // 👈 API MỚI CẦN TẠO
-      );
-      if (response.statusCode == 200) {
-        return response.data as List<dynamic>;
-      } else {
-        throw Exception('Không thể tải báo cáo của bạn');
-      }
-    } on DioException catch (e) {
-      final errorMsg = e.response?.data['message'] ?? 'Lỗi máy chủ';
-      throw Exception(errorMsg);
-    }
-  }
-
-  // 🚀 HÀM MỚI: Lấy danh sách loại sự cố (đã làm ở bước trước)
+  // 1. Lấy danh sách loại sự cố
   Future<List<dynamic>> getIncidentTypes() async {
     try {
-      final response = await _apiClient.dio.get(
-        '/aqi/incident-types',
-      );
+      final response = await _apiClient.dio.get('/aqi/incident-types');
       if (response.statusCode == 200) {
         return response.data as List<dynamic>;
       } else {
         throw Exception('Không thể tải loại sự cố');
       }
     } on DioException catch (e) {
-      final errorMsg = e.response?.data['message'] ?? 'Lỗi máy chủ';
-      throw Exception(errorMsg);
+      throw Exception(e.response?.data['message'] ?? 'Lỗi kết nối');
     }
   }
 
-  // Hàm tạo báo cáo (giữ nguyên)
-  Future<Map<String, dynamic>> createIncident({
+  // 2. Upload ảnh (Multipart)
+  Future<String> uploadImage(File file) async {
+    try {
+      String fileName = file.path.split('/').last;
+
+      // Tạo FormData
+      FormData formData = FormData.fromMap({
+        "file": await MultipartFile.fromFile(file.path, filename: fileName),
+      });
+
+      // Gọi API Backend
+      final response = await _apiClient.dio.post(
+        '/aqi/upload',
+        data: formData,
+        options: Options(
+          contentType: 'multipart/form-data', // Bắt buộc
+        ),
+      );
+
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        // Backend trả về: { "url": "http://172.27.../uploads/abc.jpg" }
+        return response.data['url'];
+      } else {
+        throw Exception('Upload ảnh thất bại');
+      }
+    } on DioException catch (e) {
+      throw Exception(e.response?.data['message'] ?? 'Lỗi upload ảnh');
+    }
+  }
+
+  // 3. Tạo báo cáo sự cố
+  Future<void> createIncident({
     required LatLng location,
     required int incidentTypeId,
     String? description,
-    String? imageUrl,
+    String? imageUrl, // URL ảnh đã upload
   }) async {
     try {
       final response = await _apiClient.dio.post(
@@ -55,25 +64,31 @@ class IncidentService {
           'incident_type_id': incidentTypeId,
           'description': description,
           'image_url': imageUrl,
+          'latitude': location.latitude,
+          'longitude': location.longitude,
+          // Định dạng GeoJSON cho PostGIS
           'location': {
             'type': 'Point',
             'coordinates': [location.longitude, location.latitude]
           }
         },
       );
-      if (response.statusCode == 201) {
-        return response.data as Map<String, dynamic>;
-      } else {
-        throw Exception('Không thể tạo báo cáo');
+
+      if (response.statusCode != 201) {
+        throw Exception('Gửi báo cáo thất bại');
       }
     } on DioException catch (e) {
-      if (e.response?.statusCode == 401) {
-        throw Exception('Phiên đăng nhập hết hạn.');
-      }
-      final errorMsg = e.response?.data['message'] ?? 'Lỗi máy chủ';
-      throw Exception(errorMsg);
+      throw Exception(e.response?.data['message'] ?? 'Lỗi gửi báo cáo');
+    }
+  }
+
+  // 4. Lấy báo cáo của tôi
+  Future<List<dynamic>> getMyIncidents() async {
+    try {
+      final response = await _apiClient.dio.get('/aqi/incidents/me');
+      return response.data as List<dynamic>;
     } catch (e) {
-      throw Exception('Đã xảy ra lỗi không xác định: $e');
+      throw Exception('Lỗi tải lịch sử báo cáo');
     }
   }
 }

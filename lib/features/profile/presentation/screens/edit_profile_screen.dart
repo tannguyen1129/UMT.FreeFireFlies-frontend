@@ -18,6 +18,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _phoneController;
   late TextEditingController _agencyController;
   bool _isLoading = false;
+  String _selectedHealthGroup = 'normal';
 
   @override
   void initState() {
@@ -26,6 +27,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _nameController = TextEditingController(text: widget.userData['full_name'] ?? '');
     _phoneController = TextEditingController(text: widget.userData['phone_number'] ?? '');
     _agencyController = TextEditingController(text: widget.userData['agency_department'] ?? '');
+    _selectedHealthGroup = widget.userData['health_group'] ?? 'normal';
   }
 
   @override
@@ -96,6 +98,23 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 decoration: const InputDecoration(labelText: 'Cơ quan / Đơn vị', border: OutlineInputBorder(), prefixIcon: Icon(Icons.apartment)),
               ),
               const SizedBox(height: 30),
+
+              const SizedBox(height: 20),
+              DropdownButtonFormField<String>(
+                value: _selectedHealthGroup,
+                decoration: const InputDecoration(
+                  labelText: 'Tình trạng sức khỏe',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.health_and_safety),
+                ),
+                items: const [
+                  DropdownMenuItem(value: 'normal', child: Text('Người bình thường')),
+                  DropdownMenuItem(value: 'sensitive', child: Text('Nhạy cảm (Người già/Trẻ em)')),
+                  DropdownMenuItem(value: 'respiratory', child: Text('Bệnh hô hấp (Hen suyễn...)')),
+                  DropdownMenuItem(value: 'athlete', child: Text('Vận động viên ngoài trời')),
+                ],
+                onChanged: (val) => setState(() => _selectedHealthGroup = val!),
+              ),
 
               SizedBox(
                 width: double.infinity,
