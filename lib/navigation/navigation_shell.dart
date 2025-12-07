@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_messaging/firebase_messaging.dart'; // 👈 Import FCM
+import 'package:firebase_messaging/firebase_messaging.dart';
 
+// Import các màn hình
 import '../features/map/presentation/screens/home_screen.dart';
 import '../features/incidents/presentation/screens/my_incidents_screen.dart';
 import '../features/profile/presentation/screens/profile_screen.dart';
 import '../features/profile/presentation/screens/achievements_screen.dart';
 import '../features/auth/presentation/providers/auth_state_provider.dart';
 import '../features/map/presentation/screens/notification_screen.dart';
+
+// 👇 Import Provider Thông báo (Bạn kiểm tra lại đường dẫn file này cho đúng nhé)
+import '../features/notifications/presentation/providers/notification_provider.dart';
 
 class NavigationShell extends StatefulWidget {
   const NavigationShell({Key? key}) : super(key: key);
@@ -19,9 +23,9 @@ class NavigationShell extends StatefulWidget {
 class _NavigationShellState extends State<NavigationShell> {
   int _selectedIndex = 0;
 
-  // 🚀 BIẾN QUẢN LÝ THÔNG BÁO
+  // 🚀 BIẾN QUẢN LÝ BADGE (Đếm số tin chưa đọc)
   int _unreadCount = 0;
-  final List<RemoteMessage> _messages = [];
+  // ❌ Đã xóa biến _messages cũ vì giờ dữ liệu nằm trong Provider
 
   // 🎨 Modern Color Palette
   static const Color primaryGreen = Color(0xFF2E7D32);
@@ -32,14 +36,18 @@ class _NavigationShellState extends State<NavigationShell> {
   void initState() {
     super.initState();
 
-    // 🚀 LẮNG NGHE TIN NHẮN ĐỂ CẬP NHẬT BADGE
+    // 🚀 LẮNG NGHE TIN NHẮN ĐỂ CẬP NHẬT BADGE & PROVIDER
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       if (message.notification != null) {
+
+        // 1. Lưu tin nhắn vào Provider để màn hình Thông báo hiển thị
+        // (listen: false vì ta đang ở trong hàm callback, không phải trong build)
+        Provider.of<NotificationProvider>(context, listen: false).addMessage(message);
+
+        // 2. Cập nhật Badge đỏ ở thanh điều hướng
         if (mounted) {
           setState(() {
-            _messages.insert(0, message); // Thêm tin mới lên đầu
-
-            // Chỉ tăng số đếm nếu không đang đứng ở tab Thông báo
+            // Chỉ tăng số đếm nếu người dùng KHÔNG đang đứng ở tab Thông báo (index 2)
             if (_selectedIndex != 2) {
               _unreadCount++;
             }
@@ -96,11 +104,11 @@ class _NavigationShellState extends State<NavigationShell> {
 
   @override
   Widget build(BuildContext context) {
-    // Danh sách trang (Phải để trong build để truyền _messages)
+    // Danh sách trang
     final List<Widget> pages = [
       const HomeScreen(),
       const MyIncidentsScreen(),
-      NotificationScreen(messages: _messages), // 👈 Tab Thông báo (Index 2)
+      const NotificationScreen(), // 👈 ĐÃ SỬA: Không truyền tham số messages nữa
       const AchievementsScreen(),
       const ProfileScreen(),
     ];
@@ -136,7 +144,6 @@ class _NavigationShellState extends State<NavigationShell> {
               ],
             ),
             actions: [
-              // Đã bỏ nút chuông ở đây vì chuyển xuống dưới
               IconButton(
                 icon: const Icon(Icons.logout_rounded, size: 24),
                 tooltip: 'Đăng xuất',

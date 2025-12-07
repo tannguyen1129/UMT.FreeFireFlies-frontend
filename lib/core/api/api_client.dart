@@ -1,5 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'dart:io'; // 👈 Import để check Platform
 import '../storage/secure_storage_service.dart';
 
 class ApiClient {
@@ -7,25 +8,37 @@ class ApiClient {
 
   ApiClient()
       : dio = Dio(BaseOptions(
-    // Bỏ 'static', đọc trực tiếp từ dotenv khi khởi tạo class
-    baseUrl: dotenv.env['API_BASE_URL'] ?? 'http://localhost:3000',
-    connectTimeout: const Duration(seconds: 60),
-    receiveTimeout: const Duration(seconds: 60),
+    baseUrl: dotenv.env['API_BASE_URL'] ??
+        (Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://localhost:3000'),
+    connectTimeout: const Duration(seconds: 30),
+    receiveTimeout: const Duration(seconds: 30),
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    },
   )) {
 
+    // Thêm Interceptor để tự động gắn Token
     dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
           try {
+            // Lấy token từ bộ nhớ an toàn
             final token = await SecureStorageService().getToken();
+
+            print("🔑 Token gửi đi: ${token != null ? 'Có (${token.substring(0, 5)}...)' : 'KHÔNG CÓ'}");
+
             if (token != null && token.isNotEmpty) {
               options.headers['Authorization'] = 'Bearer $token';
             }
           } catch (e) {
-            // Xử lý lỗi nếu việc lấy token thất bại (tùy chọn)
-            print('Error getting token: $e');
+            print('⚠️ Lỗi lấy token: $e');
           }
           return handler.next(options);
+        },
+        onError: (DioException e, handler) {
+          print("❌ API Error: [${e.response?.statusCode}] ${e.requestOptions.path}");
+          return handler.next(e);
         },
       ),
     );

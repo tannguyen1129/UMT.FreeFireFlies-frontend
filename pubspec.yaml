@@ -33,6 +33,7 @@ dependencies:
   firebase_messaging: ^16.0.4
 
   image_picker: ^1.0.4
+  xml: ^6.5.0
 
 dev_dependencies:
   flutter_test:
@@ -45,3 +46,4 @@ flutter:
   # Assets configuration
   assets:
     - .env
+    - assets/HCMC.kml

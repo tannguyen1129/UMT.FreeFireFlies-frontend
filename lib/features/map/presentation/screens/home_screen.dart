@@ -18,6 +18,8 @@ import '../../../../features/incidents/services/incident_service.dart';
 // Widgets
 import '../../../profile/presentation/widgets/health_advice_card.dart';
 import 'notification_screen.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:xml/xml.dart';
 
 
 class HomeScreen extends StatefulWidget {
@@ -76,6 +78,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
   List<CircleMarker> _forecastCircles = [];
   List<Marker> _aqiMarkers = [];
   List<RemoteMessage> _notifications = [];
+  List<Polygon> _hcmcPolygons = [];
   int _unreadCount = 0;
 
   @override
@@ -88,6 +91,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
         _fetchForecasts();
         _fetchUserProfile();
         _fetchIncidents();
+        _loadKmlPolygon();
 
         // 🚀 THÊM: Lắng nghe thông báo
         _setupFCMListener();
@@ -149,6 +153,76 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
       double d = Geolocator.distanceBetween(_startPoint!.latitude, _startPoint!.longitude, _endPoint!.latitude, _endPoint!.longitude);
       setState(() => _distanceKm = d / 1000);
     } else { setState(() => _distanceKm = null); }
+  }
+
+  Future<void> _loadKmlPolygon() async {
+    try {
+      // 1. Đọc file từ assets
+      final kmlString = await rootBundle.loadString('assets/kml/HCMC.kml');
+      final document = XmlDocument.parse(kmlString);
+
+      final polygons = <Polygon>[];
+      final allPoints = <LatLng>[];
+
+      // 2. Tìm tất cả thẻ <Coordinates> hoặc <coordinates>
+      final placemarks = document.findAllElements('Placemark');
+
+      for (var placemark in placemarks) {
+        final coordinatesNode = placemark.findAllElements('coordinates').firstOrNull;
+
+        if (coordinatesNode != null) {
+          final text = coordinatesNode.innerText.trim();
+          // KML format: long,lat,alt long,lat,alt ... (cách nhau bởi khoảng trắng hoặc xuống dòng)
+          final List<LatLng> points = [];
+
+          final rawPoints = text.split(RegExp(r'\s+'));
+          for (var raw in rawPoints) {
+            final parts = raw.split(',');
+            if (parts.length >= 2) {
+              final lng = double.tryParse(parts[0]);
+              final lat = double.tryParse(parts[1]);
+              if (lng != null && lat != null) {
+                final p = LatLng(lat, lng);
+                points.add(p);
+                allPoints.add(p);
+              }
+            }
+          }
+
+          if (points.isNotEmpty) {
+            polygons.add(Polygon(
+              points: points,
+              color: Colors.blue.withOpacity(0.1), // Màu nền
+              borderColor: Colors.blue,            // Màu viền
+              borderStrokeWidth: 2,
+              isFilled: true,
+            ));
+          }
+        }
+      }
+
+      // 3. Cập nhật UI & Tự động Zoom (Fit Bounds)
+      if (mounted && polygons.isNotEmpty) {
+        setState(() {
+          _hcmcPolygons = polygons;
+        });
+
+        // Tự động tính khung bao để zoom vừa khít bản đồ
+        if (allPoints.isNotEmpty) {
+          final bounds = LatLngBounds.fromPoints(allPoints);
+
+          // Fit camera vào bounds (Cần padding để không bị sát lề)
+          _mapController.fitCamera(
+            CameraFit.bounds(
+              bounds: bounds,
+              padding: const EdgeInsets.all(20),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print("Lỗi đọc KML: $e");
+    }
   }
 
   Future<void> _fetchIncidents() async {
@@ -811,6 +885,9 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
               TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.frontend_citizen',
               ),
+
+              PolygonLayer(polygons: _hcmcPolygons),
+
               if (_layerForecast) CircleLayer(circles: _forecastCircles),
               PolylineLayer(polylines: _polylines),
               MarkerLayer(markers: allMarkers),
