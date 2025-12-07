@@ -91,4 +91,20 @@ class IncidentService {
       throw Exception('Lỗi tải lịch sử báo cáo');
     }
   }
+
+  Future<List<dynamic>> getAllIncidents() async {
+    try {
+      // Gọi API lấy danh sách sự cố (Public hoặc User đều được)
+      final response = await _apiClient.dio.get('/aqi/incidents');
+
+      if (response.statusCode == 200) {
+        return response.data as List<dynamic>;
+      }
+      return [];
+    } catch (e) {
+      print('Lỗi lấy danh sách sự cố: $e');
+      return [];
+    }
+  }
+
 }

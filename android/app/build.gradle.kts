@@ -1,20 +1,20 @@
 plugins {
     id("com.android.application")
-    id("kotlin-android")
+    id("kotlin-android") // Hoặc "org.jetbrains.kotlin.android" tùy phiên bản Flutter
     id("dev.flutter.flutter-gradle-plugin")
-
-    // 👇 SỬA DÒNG NÀY: Xóa 'version' và 'apply false'
-    // Chỉ để lại id, nó sẽ tự lấy version từ file gốc
     id("com.google.gms.google-services")
 }
 
 android {
     namespace = "com.example.frontend_citizen"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion // Hoặc phiên bản cụ thể nếu bạn muốn giữ
+
+    // 👇 QUAN TRỌNG: Sửa dòng này để fix lỗi NDK version mismatch
+    // Không dùng flutter.ndkVersion nữa vì nó đang trỏ về bản cũ
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8 // Nên dùng 1.8 hoặc 11
+        sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
 
@@ -24,6 +24,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.frontend_citizen"
+        // Bạn có thể để minSdk 23 để tương thích tốt với các thư viện mới
         minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
@@ -40,3 +41,5 @@ android {
 flutter {
     source = "../.."
 }
+
+// 👇 Đã xóa khối buildscript{} ở đây vì nó thừa (nó thuộc về file android/build.gradle)

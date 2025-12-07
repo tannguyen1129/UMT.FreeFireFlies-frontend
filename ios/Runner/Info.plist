@@ -50,5 +50,10 @@
     <string>Ứng dụng này cần vị trí của bạn để hiển thị trên bản đồ và tìm tuyến đường.</string>
     <key>NSLocationAlwaysUsageDescription</key>
     <string>Ứng dụng này cần vị trí của bạn để hiển thị trên bản đồ và tìm tuyến đường.</string>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <true/>
+    </dict>
 </dict>
 </plist>
