@@ -1,16 +1,17 @@
-// 👇 THÊM KHỐI NÀY LÊN ĐẦU FILE
+// Top-level build file
 buildscript {
     repositories {
         google()
         mavenCentral()
     }
     dependencies {
-        // Định nghĩa version plugin ở đây
+        // 👇 SỬA LẠI: Dùng cú pháp Kotlin (dấu ngoặc tròn + nháy kép)
         classpath("com.google.gms:google-services:4.4.2")
+        // Plugin Kotlin thường Flutter tự quản lý, nhưng nếu lỗi version có thể thêm dòng dưới:
+        // classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:1.8.22")
     }
 }
 
-// 👇 Phần còn lại giữ nguyên
 allprojects {
     repositories {
         google()
