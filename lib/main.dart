@@ -2,77 +2,106 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart'; // 👈 Import dotenv
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 // Import các màn hình và provider
 import 'features/auth/presentation/providers/auth_state_provider.dart';
 import 'features/auth/presentation/screens/login_screen.dart';
 import 'navigation/navigation_shell.dart';
 
+// 👇 Import NotificationProvider
+import 'features/notifications/presentation/providers/notification_provider.dart';
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
-  // Nếu cần dùng Firebase trong background handler thì phải init lại
   await Firebase.initializeApp();
   print("🌙 Nhận thông báo ngầm (Background): ${message.messageId}");
-  // Ở đây bạn có thể xử lý logic ngầm (ví dụ lưu local storage) nhưng không update UI được
 }
 
 void main() async {
-  // 1. Đảm bảo Flutter binding đã sẵn sàng
   WidgetsFlutterBinding.ensureInitialized();
 
   try {
-    // (Để ApiClient có thể đọc được IP ngay khi app khởi động)
     await dotenv.load(fileName: ".env");
     print("✅ Đã load .env thành công");
   } catch (e) {
-    print("⚠️ Không tìm thấy file .env (Hoặc lỗi load), sẽ dùng cấu hình mặc định trong code.");
+    print("⚠️ Không tìm thấy file .env, dùng mặc định.");
   }
 
   try {
-    // 3. Khởi tạo Firebase
     await Firebase.initializeApp();
-
-    // Đăng ký hàm xử lý nền
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-    // 4. Xin quyền thông báo (Cho Android 13+ và iOS)
     FirebaseMessaging messaging = FirebaseMessaging.instance;
-    NotificationSettings settings = await messaging.requestPermission(
+    await messaging.requestPermission(
       alert: true,
       badge: true,
       sound: true,
     );
-    print('Quyền thông báo: ${settings.authorizationStatus}');
 
-    // 5. Đăng ký vào Topic chung (Để nhận cảnh báo từ Server)
     await messaging.subscribeToTopic('general_alerts');
     print("✅ Đã đăng ký nhận tin từ topic: general_alerts");
 
-    // 6. Lắng nghe tin nhắn khi đang mở App (Foreground) - Global Listener
-    // (Lưu ý: Để hiện UI đẹp, ta nên lắng nghe thêm ở từng màn hình như HomeScreen)
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      print('🔔 Nhận tin nhắn Foreground (Global): ${message.notification?.title}');
-      if (message.notification != null) {
-        print('Nội dung: ${message.notification?.body}');
-      }
-    });
-
   } catch (e) {
     print("❌ Lỗi khởi tạo Firebase: $e");
-    // App vẫn sẽ chạy tiếp dù Firebase lỗi, để bạn còn debug được UI
   }
 
   runApp(
-    ChangeNotifierProvider(
-      create: (context) => AuthStateProvider(),
+    // 🚀 Dùng MultiProvider để bọc cả Auth và Notification Provider
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthStateProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()), // 👈 Thêm cái này
+      ],
       child: const MyApp(),
     ),
   );
 }
 
-class MyApp extends StatelessWidget {
+// 🔄 Đổi thành StatefulWidget để Init listener
+class MyApp extends StatefulWidget {
   const MyApp({Key? key}) : super(key: key);
+
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+
+  @override
+  void initState() {
+    super.initState();
+    setupInteractedMessage();
+  }
+
+  Future<void> setupInteractedMessage() async {
+    // 1. Xử lý khi mở App từ thông báo (khi App đã tắt hẳn)
+    RemoteMessage? initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      _handleMessage(initialMessage);
+    }
+
+    // 2. Xử lý khi mở App từ thông báo (khi App chạy ngầm)
+    FirebaseMessaging.onMessageOpenedApp.listen(_handleMessage);
+
+    // 3. 🔔 QUAN TRỌNG: Lắng nghe tin nhắn khi App đang mở (Foreground)
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      print('🔔 Nhận tin nhắn Foreground: ${message.notification?.title}');
+
+      // Lưu tin nhắn vào Provider để các màn hình khác (NavigationShell, NotificationScreen) dùng chung
+      if (message.notification != null) {
+        Provider.of<NotificationProvider>(context, listen: false).addMessage(message);
+      }
+    });
+  }
+
+  void _handleMessage(RemoteMessage message) {
+    // Logic điều hướng khi bấm vào thông báo (nếu cần)
+    print("👆 Người dùng đã bấm vào thông báo: ${message.data}");
+
+    // Cũng lưu vào Provider luôn để hiển thị
+    Provider.of<NotificationProvider>(context, listen: false).addMessage(message);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -84,7 +113,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.green,
         visualDensity: VisualDensity.adaptivePlatformDensity,
-        useMaterial3: true, // Giao diện hiện đại hơn
+        useMaterial3: true,
       ),
       // Điều hướng dựa trên trạng thái đăng nhập
       home: authState.isAuthenticated
