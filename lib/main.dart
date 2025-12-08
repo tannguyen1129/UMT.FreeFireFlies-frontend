@@ -12,6 +12,8 @@ import 'navigation/navigation_shell.dart';
 // 👇 Import NotificationProvider
 import 'features/notifications/presentation/providers/notification_provider.dart';
 
+
+
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp();

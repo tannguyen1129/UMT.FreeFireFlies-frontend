@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../../core/storage/secure_storage_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthStateProvider extends ChangeNotifier {
   final SecureStorageService _storageService = SecureStorageService();
@@ -37,9 +38,11 @@ class AuthStateProvider extends ChangeNotifier {
 
   // Hàm gọi khi đăng xuất
   Future<void> logout() async {
-    await _storageService.deleteToken();
-    _token = null;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+
     _isAuthenticated = false;
+
     notifyListeners();
   }
 }
