@@ -67,7 +67,7 @@ class AuthService {
         data: {
           'email': email,
           'password': password,
-          'full_name': fullName,
+          "fullName": fullName,
           'phone_number': phone,
         },
       );
@@ -94,6 +94,18 @@ class AuthService {
       print('Lỗi khi đăng xuất: $e');
       // Vẫn phải xóa token dù có lỗi gì đi nữa để người dùng không bị kẹt
       await _storageService.deleteToken();
+    }
+  }
+
+  Future<dynamic> getProfile() async {
+    try {
+      // Gọi API lấy thông tin user (API này yêu cầu Token)
+      // Nếu Token hết hạn, Server sẽ trả về 401 -> Dio ném lỗi
+      final response = await _apiClient.dio.get('/users/me');
+      return response.data;
+    } catch (e) {
+      // Ném lỗi tiếp để Provider bắt được
+      rethrow;
     }
   }
 }

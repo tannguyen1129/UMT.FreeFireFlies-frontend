@@ -1,35 +1,27 @@
-/*
- * Copyright 2025 Green-AQI Navigator Team
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
+
+import '../storage/secure_storage_service.dart';
 
 import '../../../navigator_key.dart';
 import '../../features/auth/presentation/providers/auth_state_provider.dart';
 
+
 class ApiClient {
+  static final ApiClient _instance = ApiClient._internal();
+
   late final Dio _dio;
+  final SecureStorageService _secureStorage = SecureStorageService();
+  bool _isHandlingAuthError = false;
 
-  ApiClient() {
+  factory ApiClient() {
+    return _instance;
+  }
+
+  ApiClient._internal() {
     final String baseUrl = dotenv.env['API_BASE_URL'] ?? 'http://10.0.2.2:3000';
-
-    print("🌐 ApiClient đang kết nối tới: $baseUrl");
 
     _dio = Dio(
       BaseOptions(
@@ -50,9 +42,7 @@ class ApiClient {
     _dio.interceptors.add(
       InterceptorsWrapper(
         onRequest: (options, handler) async {
-          final prefs = await SharedPreferences.getInstance();
-          final token = prefs.getString('access_token');
-
+          final token = await _secureStorage.getToken();
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
           }
@@ -60,28 +50,42 @@ class ApiClient {
         },
 
         onResponse: (response, handler) {
+          _isHandlingAuthError = false; // Reset cờ khi mạng ổn
           return handler.next(response);
         },
 
         onError: (DioException e, handler) {
           final statusCode = e.response?.statusCode;
 
-          // Tự động đăng xuất khi hết phiên (401/403)
-          if (statusCode == 401 || statusCode == 403) {
-            print("🚨 Lỗi $statusCode: Phiên đăng nhập hết hạn. Đang đăng xuất...");
+          // 🛑 CHỈ LOGOUT KHI 401 (Token hết hạn/sai)
+          // 403 (Forbidden) nghĩa là user login rồi nhưng không có quyền xem -> Kệ nó.
+          if (statusCode == 401) {
+
+            if (_isHandlingAuthError) {
+              return handler.next(e);
+            }
+
+            _isHandlingAuthError = true;
+            print("🚨 API Client: Token hết hạn (401). Đang đăng xuất...");
+
             final context = navigatorKey.currentContext;
-
             if (context != null) {
-              // Gọi logout mà không cần chờ đợi (fire and forget)
-              Provider.of<AuthStateProvider>(context, listen: false).logout();
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                final authProvider = Provider.of<AuthStateProvider>(context, listen: false);
 
-              ScaffoldMessenger.of(context).clearSnackBars();
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Phiên đăng nhập đã hết hạn. Vui lòng đăng nhập lại."),
-                  backgroundColor: Colors.redAccent,
-                ),
-              );
+                if (authProvider.isAuthenticated) {
+                  authProvider.logout();
+
+                  ScaffoldMessenger.of(context).clearSnackBars();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Phiên đăng nhập hết hạn. Vui lòng đăng nhập lại."),
+                      backgroundColor: Colors.redAccent,
+                      duration: Duration(seconds: 3),
+                    ),
+                  );
+                }
+              });
             }
           }
           return handler.next(e);
@@ -90,28 +94,12 @@ class ApiClient {
     );
   }
 
-  // --- Các hàm tiện ích (Wrapper) ---
+  // --- Wrapper Methods ---
+  Future<Response> get(String path, {Map<String, dynamic>? params}) async => await _dio.get(path, queryParameters: params);
+  Future<Response> post(String path, {dynamic data}) async => await _dio.post(path, data: data);
+  Future<Response> put(String path, {dynamic data}) async => await _dio.put(path, data: data);
+  Future<Response> patch(String path, {dynamic data}) async => await _dio.patch(path, data: data);
+  Future<Response> delete(String path) async => await _dio.delete(path);
 
-  Future<Response> get(String path, {Map<String, dynamic>? params}) async {
-    return await _dio.get(path, queryParameters: params);
-  }
-
-  Future<Response> post(String path, {dynamic data}) async {
-    return await _dio.post(path, data: data);
-  }
-
-  Future<Response> put(String path, {dynamic data}) async {
-    return await _dio.put(path, data: data);
-  }
-
-  Future<Response> patch(String path, {dynamic data}) async {
-    return await _dio.patch(path, data: data);
-  }
-
-  Future<Response> delete(String path) async {
-    return await _dio.delete(path);
-  }
-
-  // Getter để truy cập Dio gốc nếu cần
   Dio get dio => _dio;
 }

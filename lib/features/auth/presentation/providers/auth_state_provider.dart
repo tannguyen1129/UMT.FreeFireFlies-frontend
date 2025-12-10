@@ -1,50 +1,57 @@
-/*
- * Copyright 2025 Green-AQI Navigator Team
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 import 'package:flutter/material.dart';
 import '../../../../core/storage/secure_storage_service.dart';
-import '../../services/auth_service.dart'; // Thêm nếu bạn cần gọi lại login/register
+import '../../services/auth_service.dart'; // Import AuthService
 
-class AuthStateProvider with ChangeNotifier {
+class AuthStateProvider extends ChangeNotifier {
   final SecureStorageService _storageService = SecureStorageService();
+  final AuthService _authService = AuthService(); // Khởi tạo AuthService
+
   bool _isAuthenticated = false;
+  bool _isChecking = true; // 🆕 Thêm biến này để hiện màn hình chờ lúc mở app
 
   bool get isAuthenticated => _isAuthenticated;
+  bool get isChecking => _isChecking;
 
-  // Constructor
   AuthStateProvider() {
-    // Kiểm tra token khi khởi động app
-    checkAuthenticationStatus();
+    _checkLoginStatus();
   }
 
-  void checkAuthenticationStatus() async {
-    final token = await _storageService.getToken();
-    _isAuthenticated = token != null;
+  // 🛡️ HÀM KIỂM TRA QUYỀN LỰC (Logic mới)
+  Future<void> _checkLoginStatus() async {
+    _isChecking = true;
     notifyListeners();
+
+    try {
+      // 1. Lấy token từ máy
+      final token = await _storageService.getToken();
+
+      if (token != null && token.isNotEmpty) {
+        await _authService.getProfile();
+
+        _isAuthenticated = true; // Token ngon -> Cho vào
+        print("✅ Token hợp lệ. Đăng nhập tự động.");
+      } else {
+        _isAuthenticated = false;
+      }
+    } catch (e) {
+      // 3. Nếu lỗi (Token thối/Hết hạn/Lỗi mạng) -> Coi như chưa đăng nhập
+      print("⚠️ Token không hợp lệ hoặc hết hạn khi khởi động: $e");
+      _isAuthenticated = false;
+      await _storageService.deleteToken(); // Xóa ngay token rác đi
+    } finally {
+      _isChecking = false; // Tắt màn hình chờ
+      notifyListeners();
+    }
   }
 
-  void loginSuccess(String token) async {
-    await _storageService.saveToken(token);
+  Future<void> loginSuccess() async {
     _isAuthenticated = true;
     notifyListeners();
   }
 
-  void logout() async {
-    await _storageService.deleteToken();
+  Future<void> logout() async {
     _isAuthenticated = false;
     notifyListeners();
+    await _storageService.deleteToken();
   }
 }
