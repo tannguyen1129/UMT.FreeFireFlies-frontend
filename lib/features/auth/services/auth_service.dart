@@ -67,7 +67,7 @@ class AuthService {
         data: {
           'email': email,
           'password': password,
-          'full_name': fullName,
+          "fullName": fullName,
           'phone_number': phone,
         },
       );

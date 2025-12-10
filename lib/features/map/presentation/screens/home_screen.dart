@@ -94,6 +94,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
   double? _distanceKm;
   String _userHealthGroup = 'normal';
   double _currentMaxPm25 = 0.0;
+  double? _routeExposure;
 
   // UI State
   bool _isLoading = false;
@@ -485,7 +486,12 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
 
   Future<void> _handleSearchRoute() async {
     FocusScope.of(context).unfocus();
+
+    // 1. Ẩn lớp AQI để bản đồ đỡ rối khi hiện đường đi
+    setState(() => _layerForecast = false);
+
     if(mounted) setState(() => _isLoading = true);
+
     try {
       LatLng? s = _startController.text == "Vị trí của tôi" ? _currentPosition : await _geocodingService.getCoordinatesFromAddress(_startController.text);
       if(s == null) { await _determinePosition(); s = _currentPosition; }
@@ -498,35 +504,74 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
 
       final json = await _routeService.getRecommendedRoutes(s, e);
       final List features = json['features'] ?? [];
+
       final List<Polyline> lines = [];
-      double totalDistance = 0.0;
+      double? mainRouteDist;
+      double? mainRouteExposure;
 
-      for(var f in features) {
+      // 2. DUYỆT QUA TẤT CẢ TUYẾN ĐƯỜNG
+      for (int i = 0; i < features.length; i++) {
+        final f = features[i];
         final coords = f['geometry']['coordinates'] as List;
-        final pts = coords.map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())).toList();
-        final type = f['properties']['routeType'];
+        final aqiList = f['properties']['pointAqis'] as List?;
 
-        // Tính tổng khoảng cách của tuyến đường chính (cleanest hoặc fastest)
-        if (totalDistance == 0.0) {
-          // Sử dụng hàm tính khoảng cách đường gấp khúc
-          const Distance distance = Distance();
-          for (int i = 0; i < pts.length - 1; i++) {
-            totalDistance += distance.as(LengthUnit.Meter, pts[i], pts[i+1]);
-          }
+        // 🔍 DEBUG LOG: Kiểm tra dữ liệu nhận được
+        print("--------------------------------------------------");
+        print("🕵️ [DEBUG ROUTE $i]");
+        print("👉 Số lượng điểm tọa độ (Coords): ${coords.length}");
+        print("👉 Dữ liệu AQI (pointAqis): ${aqiList != null ? 'CÓ (${aqiList.length} điểm)' : 'KHÔNG CÓ (NULL)'}");
+        if (aqiList != null && aqiList.isNotEmpty) {
+          print("👉 Mẫu 3 điểm AQI đầu: ${aqiList.sublist(0, 3)}");
         }
 
-        lines.add(Polyline(
-            points: pts,
-            color: type=='cleanest'?Colors.green:Colors.blue,
-            strokeWidth: type=='cleanest'? 6.0 : 4.0
-        ));
+        // Tuyến đầu tiên (index 0) là tuyến chính (Cleanest)
+        final isMainRoute = i == 0;
+
+        if (isMainRoute) {
+          mainRouteExposure = (f['properties']['exposureValue'] as num).toDouble();
+          mainRouteDist = (f['properties']['summary']['distance'] as num).toDouble();
+        }
+
+        // --- 3. LOGIC VẼ HEATMAP ---
+        // Điều kiện để vẽ màu: Phải có list AQI và số lượng điểm AQI phải bằng số lượng tọa độ
+        if (aqiList != null && aqiList.length == coords.length) {
+          print("✅ Dữ liệu khớp! Đang vẽ Heatmap đa sắc...");
+          // ... (Code vẽ đoạn nhỏ giữ nguyên) ...
+          for (int j = 0; j < coords.length - 1; j++) {
+            LatLng p1 = LatLng((coords[j][1] as num).toDouble(), (coords[j][0] as num).toDouble());
+            LatLng p2 = LatLng((coords[j+1][1] as num).toDouble(), (coords[j+1][0] as num).toDouble());
+            double pm25 = (aqiList[j] as num).toDouble();
+            Color segmentColor = _getAqiColor(pm25);
+
+            lines.add(Polyline(
+              points: [p1, p2],
+              color: isMainRoute ? segmentColor.withOpacity(1.0) : segmentColor.withOpacity(0.3),
+              strokeWidth: isMainRoute ? 7.0 : 5.0,
+              strokeCap: StrokeCap.round,
+            ));
+          }
+        } else {
+          // Nếu rơi vào đây nghĩa là lỗi dữ liệu
+          print("❌ FALLBACK: Vẽ màu xanh mặc định (Do thiếu AQI hoặc lệch độ dài)");
+
+          final pts = coords.map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())).toList();
+          lines.add(Polyline(
+              points: pts,
+              color: isMainRoute ? Colors.green : Colors.grey.withOpacity(0.5),
+              strokeWidth: isMainRoute ? 7.0 : 5.0
+          ));
+        }
       }
 
       setState(() {
         _polylines = lines;
-        _distanceKm = totalDistance / 1000; // Đổi ra km
+        if (mainRouteDist != null) _distanceKm = mainRouteDist! / 1000;
+
+
+        if (mainRouteExposure != null) _routeExposure = mainRouteExposure!;
       });
 
+      // Zoom camera để thấy toàn bộ lộ trình
       final bounds = LatLngBounds.fromPoints([s, e]);
       _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)));
 
@@ -704,7 +749,7 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
           );
         }).toList());
 
-        _showSnack("Đã tìm thấy ${areas.length} khu vực nhạy cảm");
+        _showSnack("Đã tìm thấy ${areas.length} trường học và bệnh viện");
 
       } catch(e){
         // Im lặng với lỗi Auth
@@ -849,10 +894,36 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
 
   void _clearMap() {
     setState(() {
-      _polylines=[]; _parkMarkers=[]; _sensitiveMarkers=[]; _incidentMarkers=[]; _forecastCircles=[]; _aqiMarkers=[];
-      _startPoint=null; _endPoint=null; _distanceKm=null; _startController.text="Vị trí của tôi"; _endController.clear();
-      _isNavigating=false; _layerParks=false; _layerSensitive=false; _layerForecast=false; _isPickingLocation=false;
+      // 1. Xóa các lớp vẽ trên bản đồ
+      _polylines = [];
+      _parkMarkers = [];
+      _sensitiveMarkers = [];
+      _incidentMarkers = [];
+      _forecastCircles = [];
+      _aqiMarkers = [];
+
+      // 2. Reset dữ liệu lộ trình
+      _startPoint = null;
+      _endPoint = null;
+      _distanceKm = null;
+      _routeExposure = null; // 👈 QUAN TRỌNG: Reset chỉ số bụi tích lũy
+
+      // 3. Reset ô nhập liệu
+      _startController.text = "Vị trí của tôi";
+      _endController.clear();
+
+      // 4. Reset trạng thái
+      _isNavigating = false;
+      _layerParks = false;
+      _layerSensitive = false;
+      _layerForecast = false;
+      _isPickingLocation = false;
+
+      // Reset biến xác định đang nhập điểm đi hay đến
+      _isSettingStart = true;
     });
+
+    // Lấy lại vị trí hiện tại
     _determinePosition();
   }
 
@@ -924,7 +995,64 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
 
             if (!_isNavigating) Positioned(top: 50, left: 16, right: 16, child: Column(children: [
               _buildSearchBar(),
-              if(_layerForecast && _currentMaxPm25 > 0) Padding(padding: const EdgeInsets.only(top:8), child: HealthAdviceCard(pm25: _currentMaxPm25, userHealthGroup: _userHealthGroup))
+
+              // ---------------------------------------------------------
+              // CASE 1: ĐÃ TÌM ĐƯỜNG -> HIỆN THÔNG SỐ LỘ TRÌNH & BỤI
+              // ---------------------------------------------------------
+              if (_distanceKm != null)
+                Container(
+                  margin: const EdgeInsets.only(top: 8),
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))
+                      ]
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      // Cột 1: Khoảng cách
+                      Column(
+                        children: [
+                          const Icon(Icons.place, color: Colors.blueAccent),
+                          const SizedBox(height: 4),
+                          Text(
+                              "${_distanceKm!.toStringAsFixed(2)} km",
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87)
+                          ),
+                          const Text("Khoảng cách", style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        ],
+                      ),
+
+                      // Đường kẻ dọc ngăn cách
+                      Container(width: 1, height: 40, color: Colors.grey[300]),
+
+                      // Cột 2: Lượng bụi tích lũy (Total Exposure)
+                      Column(
+                        children: [
+                          const Icon(Icons.masks, color: Colors.orange),
+                          const SizedBox(height: 4),
+                          Text(
+                              "${(_routeExposure ?? 0).toStringAsFixed(0)} µg.s",
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.deepOrange)
+                          ),
+                          const Text("Bụi tích lũy", style: TextStyle(fontSize: 10, color: Colors.grey)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+              // ---------------------------------------------------------
+              // CASE 2: CHƯA TÌM ĐƯỜNG -> HIỆN LỜI KHUYÊN SỨC KHỎE
+              // ---------------------------------------------------------
+              if (_distanceKm == null && _layerForecast && _currentMaxPm25 > 0)
+                Padding(
+                    padding: const EdgeInsets.only(top:8),
+                    child: HealthAdviceCard(pm25: _currentMaxPm25, userHealthGroup: _userHealthGroup)
+                )
             ])),
 
             if (!_isNavigating) ...[
@@ -932,10 +1060,33 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
               Positioned(bottom: 16, left: 16, right: 16, child: _buildBottomFilter()),
             ],
 
-            if (_polylines.isNotEmpty && !_isNavigating) Positioned(bottom: 80, left: 40, right: 40, child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
-                onPressed: _startNavigation, child: const Text("BẮT ĐẦU ĐI", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))
-            )),
+            if (_polylines.isNotEmpty && !_isNavigating)
+              Positioned(
+                bottom: 70, // Cách đáy 70 (Nằm trên bộ lọc, dưới nút zoom)
+                left: 0,
+                right: 0, // Trick để căn giữa: set left/right=0 rồi dùng Center
+                child: Center(
+                  child: SizedBox(
+                    width: 180, // 👈 Đặt chiều rộng cố định cho ngắn gọn
+                    child: ElevatedButton.icon(
+                      onPressed: _startNavigation,
+                      icon: const Icon(Icons.navigation, size: 20), // Thêm icon cho xịn
+                      label: const Text("BẮT ĐẦU ĐI",
+                          style: TextStyle(
+                              fontWeight: FontWeight.bold, fontSize: 16)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green, // Màu xanh chủ đạo
+                        foregroundColor: Colors.white,
+                        elevation: 6, // Đổ bóng cao để nổi bật
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(30), // Bo tròn hình viên thuốc
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
 
             if (_isNavigating) Positioned(bottom: 30, right: 16, child: FloatingActionButton(onPressed: () => _stopNavigation(), backgroundColor: Colors.red, child: const Icon(Icons.stop, color: Colors.white))),
           ],
@@ -977,7 +1128,11 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
     return SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
       _chip("AQI", Icons.cloud, Colors.orange, _layerForecast, _fetchForecasts), const SizedBox(width: 8),
       _chip("Công viên", Icons.park, Colors.green, _layerParks, _toggleParks), const SizedBox(width: 8),
-      _chip("Nhạy cảm", Icons.local_hospital, Colors.red, _layerSensitive, _toggleSensitive), const SizedBox(width: 8),
+
+      // 👇 SỬA TÊN Ở ĐÂY: Từ "Nhạy cảm" -> "Trường học & Y tế"
+      _chip("Trường học & Y tế", Icons.local_hospital, Colors.red, _layerSensitive, _toggleSensitive),
+
+      const SizedBox(width: 8),
       _chip("Cảm nhận", Icons.emoji_emotions, Colors.teal, false, _showPerceptionDialog),
     ]));
   }
