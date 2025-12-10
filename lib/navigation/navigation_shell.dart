@@ -1,17 +1,7 @@
 /*
  * Copyright 2025 Green-AQI Navigator Team
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Apache License 2.0
+ * 
  */
 
 import 'package:flutter/material.dart';
@@ -25,9 +15,27 @@ import '../features/profile/presentation/screens/profile_screen.dart';
 import '../features/profile/presentation/screens/achievements_screen.dart';
 import '../features/auth/presentation/providers/auth_state_provider.dart';
 import '../features/map/presentation/screens/notification_screen.dart';
-
-// 👇 Import Provider Thông báo (Bạn kiểm tra lại đường dẫn file này cho đúng nhé)
 import '../features/notifications/presentation/providers/notification_provider.dart';
+
+// ============================================
+// 🎨 DESIGN SYSTEM
+// ============================================
+class AppColors {
+  static const primary = Color(0xFF2E7D32);
+  static const primaryLight = Color(0xFF66BB6A);
+  static const primaryDark = Color(0xFF1B5E20);
+  static const accent = Color(0xFF81C784);
+  
+  static const background = Color(0xFFF8F9FA);
+  static const surface = Colors.white;
+  static const surfaceVariant = Color(0xFFF1F8F4);
+  
+  static const textPrimary = Color(0xFF212121);
+  static const textSecondary = Color(0xFF757575);
+  
+  static const error = Color(0xFFEF5350);
+  static const divider = Color(0xFFE0E0E0);
+}
 
 class NavigationShell extends StatefulWidget {
   const NavigationShell({Key? key}) : super(key: key);
@@ -36,47 +44,54 @@ class NavigationShell extends StatefulWidget {
   State<NavigationShell> createState() => _NavigationShellState();
 }
 
-class _NavigationShellState extends State<NavigationShell> {
+class _NavigationShellState extends State<NavigationShell> with SingleTickerProviderStateMixin {
   int _selectedIndex = 0;
-
-  // 🚀 BIẾN QUẢN LÝ BADGE (Đếm số tin chưa đọc)
   int _unreadCount = 0;
-  // ❌ Đã xóa biến _messages cũ vì giờ dữ liệu nằm trong Provider
-
-  // 🎨 Modern Color Palette
-  static const Color primaryGreen = Color(0xFF2E7D32);
-  static const Color accentGreen = Color(0xFF66BB6A);
-  static const Color bgLight = Color(0xFFF1F8F4);
+  late AnimationController _animationController;
+  late Animation<double> _scaleAnimation;
 
   @override
   void initState() {
     super.initState();
+    
+    // Animation cho icon khi được chọn
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 200),
+      vsync: this,
+    );
+    
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 1.1).animate(
+      CurvedAnimation(parent: _animationController, curve: Curves.easeInOut),
+    );
 
-    // 🚀 LẮNG NGHE TIN NHẮN ĐỂ CẬP NHẬT BADGE & PROVIDER
+    // Lắng nghe Firebase Messaging
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       if (message.notification != null) {
+        Provider.of<NotificationProvider>(context, listen: false)
+            .addMessage(message);
 
-        // 1. Lưu tin nhắn vào Provider để màn hình Thông báo hiển thị
-        // (listen: false vì ta đang ở trong hàm callback, không phải trong build)
-        Provider.of<NotificationProvider>(context, listen: false).addMessage(message);
-
-        // 2. Cập nhật Badge đỏ ở thanh điều hướng
-        if (mounted) {
+        if (mounted && _selectedIndex != 2) {
           setState(() {
-            // Chỉ tăng số đếm nếu người dùng KHÔNG đang đứng ở tab Thông báo (index 2)
-            if (_selectedIndex != 2) {
-              _unreadCount++;
-            }
+            _unreadCount++;
           });
         }
       }
     });
   }
 
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
+
   void _onItemTapped(int index) {
+    if (_selectedIndex == index) {
+      _animationController.forward().then((_) => _animationController.reverse());
+    }
+    
     setState(() {
       _selectedIndex = index;
-      // Nếu bấm vào tab Thông báo (index 2) -> Xóa badge
       if (index == 2) {
         _unreadCount = 0;
       }
@@ -87,19 +102,50 @@ class _NavigationShellState extends State<NavigationShell> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        contentPadding: const EdgeInsets.all(24),
         title: Row(
-          children: const [
-            Icon(Icons.logout_outlined, color: primaryGreen),
-            SizedBox(width: 12),
-            Text('Xác nhận đăng xuất'),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.error.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.logout_rounded, color: AppColors.error, size: 24),
+            ),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Xác nhận đăng xuất',
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
           ],
         ),
-        content: const Text('Bạn có chắc chắn muốn đăng xuất?'),
+        content: const Text(
+          'Bạn có chắc chắn muốn đăng xuất khỏi ứng dụng?',
+          style: TextStyle(
+            fontSize: 15,
+            color: AppColors.textSecondary,
+            height: 1.5,
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Hủy', style: TextStyle(color: Colors.grey)),
+            style: TextButton.styleFrom(
+              foregroundColor: AppColors.textSecondary,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            child: const Text('Hủy', style: TextStyle(fontWeight: FontWeight.w600)),
           ),
           ElevatedButton(
             onPressed: () {
@@ -107,11 +153,15 @@ class _NavigationShellState extends State<NavigationShell> {
               Provider.of<AuthStateProvider>(context, listen: false).logout();
             },
             style: ElevatedButton.styleFrom(
-              backgroundColor: primaryGreen,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              backgroundColor: AppColors.error,
+              foregroundColor: Colors.white,
               elevation: 0,
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
             ),
-            child: const Text('Đăng xuất'),
+            child: const Text('Đăng xuất', style: TextStyle(fontWeight: FontWeight.w600)),
           ),
         ],
       ),
@@ -120,62 +170,87 @@ class _NavigationShellState extends State<NavigationShell> {
 
   @override
   Widget build(BuildContext context) {
-    // Danh sách trang
     final List<Widget> pages = [
       const HomeScreen(),
       const MyIncidentsScreen(),
-      const NotificationScreen(), // 👈 ĐÃ SỬA: Không truyền tham số messages nữa
+      const NotificationScreen(),
       const AchievementsScreen(),
       const ProfileScreen(),
     ];
 
     return Scaffold(
-      // 🎨 Modern AppBar
+      // 🎨 Modern AppBar với Gradient
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(64),
         child: Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              colors: [primaryGreen, accentGreen],
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [AppColors.primary, AppColors.primaryLight],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
             boxShadow: [
-              BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, 2)),
+              BoxShadow(
+                color: AppColors.primary.withOpacity(0.3),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
             ],
           ),
-          child: AppBar(
-            backgroundColor: Colors.transparent,
-            elevation: 0,
-            centerTitle: true,
-            title: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: const [
-                Icon(Icons.eco_outlined, size: 26),
-                SizedBox(width: 10),
-                Text(
-                  'Green-AQI',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600, letterSpacing: 0.5),
-                ),
-              ],
-            ),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.logout_rounded, size: 24),
-                tooltip: 'Đăng xuất',
-                onPressed: _handleLogout,
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Row(
+                children: [
+                  // Logo
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(
+                      Icons.eco_rounded,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  // Title
+                  const Expanded(
+                    child: Text(
+                      'Green-AQI',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: 0.3,
+                      ),
+                    ),
+                  ),
+                  // Logout Button
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: IconButton(
+                      icon: const Icon(Icons.logout_rounded, color: Colors.white, size: 22),
+                      tooltip: 'Đăng xuất',
+                      onPressed: _handleLogout,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-            ],
+            ),
           ),
         ),
       ),
 
-      // 🌈 Body
       body: Container(
-        decoration: const BoxDecoration(
+        decoration: BoxDecoration(
           gradient: LinearGradient(
-            colors: [bgLight, Colors.white],
+            colors: [AppColors.surfaceVariant, AppColors.surface],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -186,70 +261,110 @@ class _NavigationShellState extends State<NavigationShell> {
         ),
       ),
 
-      // 🎯 Bottom Navigation Bar (5 Tabs)
+      // 🎯 Bottom Navigation Bar (Redesigned)
       bottomNavigationBar: Container(
-        decoration: const BoxDecoration(
-          boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 12, offset: Offset(0, -2))],
+        decoration: BoxDecoration(
+          color: Colors.white,
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 20,
+              offset: const Offset(0, -4),
+            ),
+          ],
         ),
-        child: ClipRRect(
-          borderRadius: const BorderRadius.only(topLeft: Radius.circular(24), topRight: Radius.circular(24)),
-          child: BottomNavigationBar(
-            type: BottomNavigationBarType.fixed,
-            currentIndex: _selectedIndex,
-            onTap: _onItemTapped,
-            backgroundColor: Colors.white,
-            selectedItemColor: primaryGreen,
-            unselectedItemColor: Colors.grey.shade400,
-            selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11),
-            unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 10),
-            showUnselectedLabels: true,
-            elevation: 0,
-            items: [
-              _buildNavItem(Icons.map_outlined, Icons.map, 'Bản đồ', 0),
-              _buildNavItem(Icons.warning_amber_outlined, Icons.warning_amber, 'Báo cáo', 1),
-
-              // 🚀 TAB THÔNG BÁO (CÓ BADGE)
-              BottomNavigationBarItem(
-                icon: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: _selectedIndex == 2 ? primaryGreen.withOpacity(0.12) : Colors.transparent,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Icon(
-                        _selectedIndex == 2 ? Icons.notifications : Icons.notifications_outlined,
-                        size: 28,
-                      ),
-                    ),
-                    if (_unreadCount > 0)
-                      Positioned(
-                        right: 4,
-                        top: 4,
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: Colors.red,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 1.5),
-                          ),
-                          constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                          child: Text(
-                            '$_unreadCount',
-                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      )
-                  ],
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildNavItem(
+                  icon: Icons.map_outlined,
+                  activeIcon: Icons.map_rounded,
+                  label: 'Bản đồ',
+                  index: 0,
                 ),
-                label: 'Thông báo',
-              ),
+                _buildNavItem(
+                  icon: Icons.warning_amber_outlined,
+                  activeIcon: Icons.warning_amber_rounded,
+                  label: 'Báo cáo',
+                  index: 1,
+                ),
+                _buildNavItemWithBadge(
+                  icon: Icons.notifications_outlined,
+                  activeIcon: Icons.notifications_rounded,
+                  label: 'Thông báo',
+                  index: 2,
+                  badgeCount: _unreadCount,
+                ),
+                _buildNavItem(
+                  icon: Icons.emoji_events_outlined,
+                  activeIcon: Icons.emoji_events_rounded,
+                  label: 'Thành tích',
+                  index: 3,
+                ),
+                _buildNavItem(
+                  icon: Icons.person_outline_rounded,
+                  activeIcon: Icons.person_rounded,
+                  label: 'Hồ sơ',
+                  index: 4,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 
-              _buildNavItem(Icons.emoji_events_outlined, Icons.emoji_events, 'Thành tích', 3),
-              _buildNavItem(Icons.person_outline, Icons.person, 'Hồ sơ', 4),
+  // 🎨 Custom Navigation Item
+  Widget _buildNavItem({
+    required IconData icon,
+    required IconData activeIcon,
+    required String label,
+    required int index,
+  }) {
+    final isSelected = _selectedIndex == index;
+    
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => _onItemTapped(index),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon Container
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isSelected
+                      ? AppColors.primary.withOpacity(0.12)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  isSelected ? activeIcon : icon,
+                  size: 26,
+                  color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              // Label
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                  letterSpacing: 0.2,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ],
           ),
         ),
@@ -257,19 +372,97 @@ class _NavigationShellState extends State<NavigationShell> {
     );
   }
 
-  // 🎨 Custom Navigation Item Helper
-  BottomNavigationBarItem _buildNavItem(IconData outlinedIcon, IconData filledIcon, String label, int index) {
+  // 🔔 Navigation Item with Badge
+  Widget _buildNavItemWithBadge({
+    required IconData icon,
+    required IconData activeIcon,
+    required String label,
+    required int index,
+    required int badgeCount,
+  }) {
     final isSelected = _selectedIndex == index;
-    return BottomNavigationBarItem(
-      icon: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? primaryGreen.withOpacity(0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(16),
+    
+    return Expanded(
+      child: GestureDetector(
+        onTap: () => _onItemTapped(index),
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon Container với Badge
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? AppColors.primary.withOpacity(0.12)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Icon(
+                      isSelected ? activeIcon : icon,
+                      size: 26,
+                      color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                    ),
+                  ),
+                  // Badge
+                  if (badgeCount > 0)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFFEF5350), Color(0xFFE53935)],
+                          ),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.white, width: 2),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.red.withOpacity(0.4),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                        child: Text(
+                          badgeCount > 99 ? '99+' : '$badgeCount',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            height: 1.2,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              // Label
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  color: isSelected ? AppColors.primary : AppColors.textSecondary,
+                  letterSpacing: 0.2,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
         ),
-        child: Icon(isSelected ? filledIcon : outlinedIcon, size: 28),
       ),
-      label: label,
     );
   }
 }

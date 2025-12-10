@@ -27,7 +27,8 @@ import '../../services/incident_service.dart';
 class IncidentReportScreen extends StatefulWidget {
   final LatLng initialCenter;
 
-  const IncidentReportScreen({Key? key, required this.initialCenter}) : super(key: key);
+  const IncidentReportScreen({Key? key, required this.initialCenter})
+      : super(key: key);
 
   @override
   State<IncidentReportScreen> createState() => _IncidentReportScreenState();
@@ -80,7 +81,8 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) throw Exception('Quyền GPS bị từ chối');
+        if (permission == LocationPermission.denied)
+          throw Exception('Quyền GPS bị từ chối');
       }
 
       final position = await Geolocator.getCurrentPosition();
@@ -142,7 +144,9 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
       return;
     }
 
-    setState(() { _isLoading = true; });
+    setState(() {
+      _isLoading = true;
+    });
 
     try {
       // 1. Upload ảnh (Nếu có)
@@ -164,13 +168,16 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Báo cáo thành công!')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Báo cáo thành công!')));
       Navigator.of(context).pop(); // Đóng màn hình
-
     } catch (e) {
       _showSnack('Lỗi: $e');
     } finally {
-      if (mounted) setState(() { _isLoading = false; });
+      if (mounted)
+        setState(() {
+          _isLoading = false;
+        });
     }
   }
 
@@ -184,12 +191,29 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFFF2F7F2),
       appBar: AppBar(
-        title: const Text('Báo cáo Sự cố'),
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF2E7D32), Color(0xFF66BB6A)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
+        elevation: 0,
+        title: const Text(
+          'Báo cáo Sự cố',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
         actions: [
           if (!_isLoading)
             IconButton(
-              icon: const Icon(Icons.send),
+              icon: const Icon(Icons.send_rounded),
               onPressed: _submitReport,
               tooltip: 'Gửi báo cáo',
             ),
@@ -198,147 +222,258 @@ class _IncidentReportScreenState extends State<IncidentReportScreen> {
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Column(
-        children: [
-          // 1. BẢN ĐỒ (Phần trên)
-          Expanded(
-            flex: 4,
-            child: Stack(
               children: [
-                FlutterMap(
-                  mapController: _mapController,
-                  options: MapOptions(
-                    initialCenter: widget.initialCenter,
-                    initialZoom: 16.0,
-                    onTap: (_, point) => _handleMapTap(point),
+                // 1. BẢN ĐỒ (Phần trên)
+                Expanded(
+                  flex: 4,
+                  child: Stack(
+                    children: [
+                      FlutterMap(
+                        mapController: _mapController,
+                        options: MapOptions(
+                          initialCenter: widget.initialCenter,
+                          initialZoom: 16.0,
+                          onTap: (_, point) => _handleMapTap(point),
+                        ),
+                        children: [
+                          TileLayer(
+                              urlTemplate:
+                                  'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
+                          if (_incidentLocation != null)
+                            MarkerLayer(markers: [
+                              Marker(
+                                point: _incidentLocation!,
+                                width: 40,
+                                height: 40,
+                                child: const Icon(Icons.location_on,
+                                    color: Color(0xFFF44336), size: 40),
+                              )
+                            ]),
+                        ],
+                      ),
+                      Positioned(
+                        bottom: 16,
+                        right: 16,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: const LinearGradient(
+                              colors: [Color(0xFF2E7D32), Color(0xFF66BB6A)],
+                            ),
+                            borderRadius: BorderRadius.circular(16),
+                            boxShadow: [
+                              BoxShadow(
+                                color: const Color(0xFF2E7D32).withOpacity(0.4),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                          child: FloatingActionButton.small(
+                            onPressed: _useCurrentLocation,
+                            backgroundColor: Colors.transparent,
+                            elevation: 0,
+                            child: const Icon(Icons.my_location_rounded,
+                                color: Colors.white),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  children: [
-                    TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png'),
-                    if (_incidentLocation != null)
-                      MarkerLayer(markers: [
-                        Marker(
-                          point: _incidentLocation!,
-                          width: 40, height: 40,
-                          child: const Icon(Icons.location_on, color: Colors.red, size: 40),
+                ),
+
+                // 2. FORM NHẬP LIỆU (Phần dưới)
+                Expanded(
+                  flex: 6,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16.0),
+                    children: [
+                      const Text(
+                        'Thông tin chi tiết',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2E7D32),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Dropdown Loại sự cố
+                      FutureBuilder<List<dynamic>>(
+                        future: _incidentTypesFuture,
+                        builder: (context, snapshot) {
+                          if (!snapshot.hasData)
+                            return const LinearProgressIndicator();
+                          return DropdownButtonFormField<int>(
+                            value: _selectedIncidentTypeId,
+                            hint: const Text('Chọn loại sự cố'),
+                            decoration: InputDecoration(
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: BorderSide.none,
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide:
+                                    BorderSide(color: Colors.grey.shade300),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(16),
+                                borderSide: const BorderSide(
+                                    color: Color(0xFF2E7D32), width: 2),
+                              ),
+                              prefixIcon: const Icon(Icons.category_rounded,
+                                  color: Color(0xFF2E7D32)),
+                            ),
+                            items: snapshot.data!
+                                .map((type) => DropdownMenuItem<int>(
+                                      value: type['type_id'],
+                                      child: Text(type['type_name']),
+                                    ))
+                                .toList(),
+                            onChanged: (v) =>
+                                setState(() => _selectedIncidentTypeId = v),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 15),
+
+                      // Input Mô tả
+                      TextField(
+                        controller: _descriptionController,
+                        decoration: InputDecoration(
+                          labelText: 'Mô tả thêm',
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide.none,
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(16),
+                            borderSide: const BorderSide(
+                                color: Color(0xFF2E7D32), width: 2),
+                          ),
+                          prefixIcon: const Icon(Icons.description_rounded,
+                              color: Color(0xFF2E7D32)),
+                          alignLabelWithHint: true,
+                        ),
+                        maxLines: 3,
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Chọn ảnh
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'Hình ảnh minh chứng:',
+                            style: TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 16,
+                              color: Color(0xFF2E7D32),
+                            ),
+                          ),
+                          Row(
+                            children: [
+                              IconButton(
+                                onPressed: _takePhoto,
+                                icon: const Icon(Icons.camera_alt_rounded,
+                                    color: Color(0xFF2E7D32)),
+                                tooltip: 'Chụp ảnh',
+                              ),
+                              IconButton(
+                                onPressed: _pickImages,
+                                icon: const Icon(Icons.photo_library_rounded,
+                                    color: Color(0xFF2E7D32)),
+                                tooltip: 'Chọn từ thư viện',
+                              ),
+                            ],
+                          )
+                        ],
+                      ),
+
+                      // Hiển thị ảnh
+                      if (_selectedImages.isNotEmpty)
+                        SizedBox(
+                          height: 100,
+                          child: ListView.builder(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _selectedImages.length,
+                            itemBuilder: (context, index) {
+                              return Stack(
+                                children: [
+                                  Container(
+                                    margin: const EdgeInsets.only(right: 10),
+                                    width: 100,
+                                    height: 100,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(16),
+                                      border: Border.all(
+                                          color: Colors.grey.shade300,
+                                          width: 2),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: const Color(0xFF2E7D32)
+                                              .withOpacity(0.1),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 2),
+                                        ),
+                                      ],
+                                      image: DecorationImage(
+                                        image: FileImage(
+                                            File(_selectedImages[index].path)),
+                                        fit: BoxFit.cover,
+                                      ),
+                                    ),
+                                  ),
+                                  Positioned(
+                                    top: 4,
+                                    right: 14,
+                                    child: GestureDetector(
+                                      onTap: () => _removeImage(index),
+                                      child: Container(
+                                        padding: const EdgeInsets.all(4),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          shape: BoxShape.circle,
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color:
+                                                  Colors.black.withOpacity(0.2),
+                                              blurRadius: 4,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                        child: const Icon(Icons.close_rounded,
+                                            size: 16, color: Color(0xFFF44336)),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
                         )
-                      ]),
-                  ],
-                ),
-                Positioned(
-                  bottom: 10, right: 10,
-                  child: FloatingActionButton.small(
-                    onPressed: _useCurrentLocation,
-                    backgroundColor: Colors.white,
-                    child: const Icon(Icons.my_location, color: Colors.blue),
+                      else
+                        const Padding(
+                          padding: EdgeInsets.all(10),
+                          child: Text('Chưa có ảnh nào.',
+                              style: TextStyle(
+                                  color: Colors.grey,
+                                  fontStyle: FontStyle.italic)),
+                        ),
+                    ],
                   ),
                 ),
               ],
             ),
-          ),
-
-          // 2. FORM NHẬP LIỆU (Phần dưới)
-          Expanded(
-            flex: 6,
-            child: ListView(
-              padding: const EdgeInsets.all(16.0),
-              children: [
-                const Text('Thông tin chi tiết', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-
-                // Dropdown Loại sự cố
-                FutureBuilder<List<dynamic>>(
-                  future: _incidentTypesFuture,
-                  builder: (context, snapshot) {
-                    if (!snapshot.hasData) return const LinearProgressIndicator();
-                    return DropdownButtonFormField<int>(
-                      value: _selectedIncidentTypeId,
-                      hint: const Text('Chọn loại sự cố'),
-                      decoration: const InputDecoration(border: OutlineInputBorder(), prefixIcon: Icon(Icons.category)),
-                      items: snapshot.data!.map((type) => DropdownMenuItem<int>(
-                        value: type['type_id'],
-                        child: Text(type['type_name']),
-                      )).toList(),
-                      onChanged: (v) => setState(() => _selectedIncidentTypeId = v),
-                    );
-                  },
-                ),
-                const SizedBox(height: 15),
-
-                // Input Mô tả
-                TextField(
-                  controller: _descriptionController,
-                  decoration: const InputDecoration(
-                    labelText: 'Mô tả thêm',
-                    border: OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.description),
-                    alignLabelWithHint: true,
-                  ),
-                  maxLines: 3,
-                ),
-                const SizedBox(height: 20),
-
-                // Chọn ảnh
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text('Hình ảnh minh chứng:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Row(
-                      children: [
-                        IconButton(onPressed: _takePhoto, icon: const Icon(Icons.camera_alt, color: Colors.blue)),
-                        IconButton(onPressed: _pickImages, icon: const Icon(Icons.photo_library, color: Colors.green)),
-                      ],
-                    )
-                  ],
-                ),
-
-                // Hiển thị ảnh
-                if (_selectedImages.isNotEmpty)
-                  SizedBox(
-                    height: 100,
-                    child: ListView.builder(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: _selectedImages.length,
-                      itemBuilder: (context, index) {
-                        return Stack(
-                          children: [
-                            Container(
-                              margin: const EdgeInsets.only(right: 8),
-                              width: 100,
-                              height: 100,
-                              decoration: BoxDecoration(
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.grey.shade300),
-                                image: DecorationImage(
-                                  image: FileImage(File(_selectedImages[index].path)),
-                                  fit: BoxFit.cover,
-                                ),
-                              ),
-                            ),
-                            Positioned(
-                              top: 0, right: 8,
-                              child: GestureDetector(
-                                onTap: () => _removeImage(index),
-                                child: Container(
-                                  padding: const EdgeInsets.all(2),
-                                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                                  child: const Icon(Icons.close, size: 18, color: Colors.red),
-                                ),
-                              ),
-                            ),
-                          ],
-                        );
-                      },
-                    ),
-                  )
-                else
-                  const Padding(
-                    padding: EdgeInsets.all(10),
-                    child: Text('Chưa có ảnh nào.', style: TextStyle(color: Colors.grey, fontStyle: FontStyle.italic)),
-                  ),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

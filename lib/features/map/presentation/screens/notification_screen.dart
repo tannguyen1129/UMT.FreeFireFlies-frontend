@@ -29,42 +29,95 @@ class NotificationScreen extends StatelessWidget {
     final messages = notificationProvider.messages;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Thông báo"),
-        actions: [
-          // Nút xóa nhanh để test
-          IconButton(
-            icon: const Icon(Icons.delete_outline),
-            onPressed: () => notificationProvider.clearMessages(),
-          )
-        ],
-      ),
+      backgroundColor: const Color(0xFFF2F7F2),
       body: messages.isEmpty
-          ? const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.notifications_off, size: 60, color: Colors.grey),
-            Text("Chưa có thông báo nào"),
-          ],
-        ),
-      )
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.notifications_off_rounded,
+                    size: 80,
+                    color: Colors.grey[300],
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    "Chưa có thông báo nào",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.grey[600],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    "Các thông báo sẽ hiển thị tại đây",
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.grey[500],
+                    ),
+                  ),
+                ],
+              ),
+            )
           : ListView.builder(
-        itemCount: messages.length,
-        itemBuilder: (context, index) {
-          // Đảo ngược để tin mới nhất lên đầu
-          final msg = messages[messages.length - 1 - index];
+              padding: const EdgeInsets.all(16),
+              itemCount: messages.length,
+              itemBuilder: (context, index) {
+                // Đảo ngược để tin mới nhất lên đầu
+                final msg = messages[messages.length - 1 - index];
 
-          return Card(
-            // ... (Giữ nguyên code UI Card của bạn) ...
-            child: ListTile(
-              title: Text(msg.notification?.title ?? 'Hệ thống'),
-              subtitle: Text(msg.notification?.body ?? ''),
-              // ...
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF2E7D32).withOpacity(0.08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.all(16),
+                    leading: Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF2E7D32), Color(0xFF66BB6A)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.notifications_active_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                    title: Text(
+                      msg.notification?.title ?? 'Hệ thống',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    subtitle: Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Text(
+                        msg.notification?.body ?? '',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: Colors.grey[700],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
-          );
-        },
-      ),
     );
   }
 }

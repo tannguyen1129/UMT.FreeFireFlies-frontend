@@ -40,9 +40,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void initState() {
     super.initState();
     // Điền sẵn dữ liệu cũ
-    _nameController = TextEditingController(text: widget.userData['full_name'] ?? '');
-    _phoneController = TextEditingController(text: widget.userData['phone_number'] ?? '');
-    _agencyController = TextEditingController(text: widget.userData['agency_department'] ?? '');
+    _nameController =
+        TextEditingController(text: widget.userData['full_name'] ?? '');
+    _phoneController =
+        TextEditingController(text: widget.userData['phone_number'] ?? '');
+    _agencyController =
+        TextEditingController(text: widget.userData['agency_department'] ?? '');
     _selectedHealthGroup = widget.userData['health_group'] ?? 'normal';
   }
 
@@ -66,11 +69,13 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cập nhật thành công!')));
-      Navigator.of(context).pop(true); // Trả về true để màn hình trước reload lại
-
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Cập nhật thành công!')));
+      Navigator.of(context)
+          .pop(true); // Trả về true để màn hình trước reload lại
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Lỗi: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Lỗi: $e')));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -79,7 +84,26 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Chỉnh sửa Hồ sơ")),
+      backgroundColor: const Color(0xFFF2F7F2),
+      appBar: AppBar(
+        flexibleSpace: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF2E7D32), Color(0xFF66BB6A)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+          ),
+        ),
+        elevation: 0,
+        title: const Text(
+          "Chỉnh sửa Hồ sơ",
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            fontSize: 20,
+          ),
+        ),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -87,58 +111,178 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           child: Column(
             children: [
               const SizedBox(height: 20),
-              // Avatar (Placeholder)
-              const CircleAvatar(
-                radius: 50,
-                backgroundColor: Colors.green,
-                child: Icon(Icons.person, size: 50, color: Colors.white),
+              // Avatar (Placeholder) with shadow
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF2E7D32).withOpacity(0.3),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: const CircleAvatar(
+                  radius: 60,
+                  backgroundColor: Color(0xFF2E7D32),
+                  child:
+                      Icon(Icons.person_rounded, size: 60, color: Colors.white),
+                ),
               ),
               const SizedBox(height: 30),
 
               TextFormField(
                 controller: _nameController,
-                decoration: const InputDecoration(labelText: 'Họ và tên', border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
+                decoration: InputDecoration(
+                  labelText: 'Họ và tên',
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF2E7D32), width: 2),
+                  ),
+                  prefixIcon: const Icon(Icons.person_rounded,
+                      color: Color(0xFF2E7D32)),
+                ),
                 validator: (v) => v!.isEmpty ? 'Không được để trống' : null,
               ),
               const SizedBox(height: 20),
 
               TextFormField(
                 controller: _phoneController,
-                decoration: const InputDecoration(labelText: 'Số điện thoại', border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone)),
+                decoration: InputDecoration(
+                  labelText: 'Số điện thoại',
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF2E7D32), width: 2),
+                  ),
+                  prefixIcon:
+                      const Icon(Icons.phone_rounded, color: Color(0xFF2E7D32)),
+                ),
                 keyboardType: TextInputType.phone,
               ),
               const SizedBox(height: 20),
 
               TextFormField(
                 controller: _agencyController,
-                decoration: const InputDecoration(labelText: 'Cơ quan / Đơn vị', border: OutlineInputBorder(), prefixIcon: Icon(Icons.apartment)),
+                decoration: InputDecoration(
+                  labelText: 'Cơ quan / Đơn vị',
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF2E7D32), width: 2),
+                  ),
+                  prefixIcon: const Icon(Icons.apartment_rounded,
+                      color: Color(0xFF2E7D32)),
+                ),
               ),
-              const SizedBox(height: 30),
-
               const SizedBox(height: 20),
+
               DropdownButtonFormField<String>(
                 value: _selectedHealthGroup,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Tình trạng sức khỏe',
-                  border: OutlineInputBorder(),
-                  prefixIcon: Icon(Icons.health_and_safety),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: BorderSide(color: Colors.grey.shade300),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF2E7D32), width: 2),
+                  ),
+                  prefixIcon: const Icon(Icons.health_and_safety_rounded,
+                      color: Color(0xFF2E7D32)),
                 ),
                 items: const [
-                  DropdownMenuItem(value: 'normal', child: Text('Người bình thường')),
-                  DropdownMenuItem(value: 'sensitive', child: Text('Nhạy cảm (Người già/Trẻ em)')),
-                  DropdownMenuItem(value: 'respiratory', child: Text('Bệnh hô hấp (Hen suyễn...)')),
-                  DropdownMenuItem(value: 'athlete', child: Text('Vận động viên ngoài trời')),
+                  DropdownMenuItem(
+                      value: 'normal', child: Text('Người bình thường')),
+                  DropdownMenuItem(
+                      value: 'sensitive',
+                      child: Text('Nhạy cảm (Người già/Trẻ em)')),
+                  DropdownMenuItem(
+                      value: 'respiratory',
+                      child: Text('Bệnh hô hấp (Hen suyễn...)')),
+                  DropdownMenuItem(
+                      value: 'athlete',
+                      child: Text('Vận động viên ngoài trời')),
                 ],
                 onChanged: (val) => setState(() => _selectedHealthGroup = val!),
               ),
 
-              SizedBox(
+              const SizedBox(height: 10),
+              Container(
                 width: double.infinity,
-                height: 50,
+                height: 54,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF2E7D32), Color(0xFF66BB6A)],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF2E7D32).withOpacity(0.4),
+                      blurRadius: 15,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
                 child: ElevatedButton(
                   onPressed: _isLoading ? null : _handleUpdate,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                  child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : const Text('LƯU THAY ĐỔI', style: TextStyle(fontSize: 16)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: _isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text(
+                          'LƯU THAY ĐỔI',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
                 ),
               ),
             ],

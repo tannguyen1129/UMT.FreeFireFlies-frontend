@@ -25,8 +25,8 @@ class ProfileScreen extends StatefulWidget {
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
-class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveClientMixin {
-
+class _ProfileScreenState extends State<ProfileScreen>
+    with AutomaticKeepAliveClientMixin {
   @override
   bool get wantKeepAlive => true;
 
@@ -58,7 +58,8 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
       future: _profileFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+              body: Center(child: CircularProgressIndicator()));
         }
 
         if (snapshot.hasError) {
@@ -67,15 +68,18 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Text('Lỗi tải hồ sơ', style: TextStyle(color: Colors.red)),
-                  ElevatedButton(onPressed: _loadData, child: const Text("Thử lại"))
+                  const Text('Lỗi tải hồ sơ',
+                      style: TextStyle(color: Colors.red)),
+                  ElevatedButton(
+                      onPressed: _loadData, child: const Text("Thử lại"))
                 ],
               ),
             ),
           );
         }
 
-        if (!snapshot.hasData) return const Scaffold(body: Center(child: Text('Không có dữ liệu')));
+        if (!snapshot.hasData)
+          return const Scaffold(body: Center(child: Text('Không có dữ liệu')));
 
         final user = snapshot.data!;
 
@@ -83,65 +87,147 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
         final points = user['greenPoints'] ?? user['green_points'] ?? 0;
 
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Hồ sơ Cá nhân'),
-            centerTitle: true,
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.edit),
-                tooltip: 'Chỉnh sửa thông tin',
-                onPressed: () async {
-                  final result = await Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (context) => EditProfileScreen(userData: user)),
-                  );
-                  if (result == true) _loadData(); // Reload nếu có sửa
-                },
-              )
-            ],
-          ),
+          backgroundColor: const Color(0xFFF2F7F2),
           // 🚀 TÍNH NĂNG MỚI: Kéo xuống để làm mới (RefreshIndicator)
           // Giúp cập nhật điểm số sau khi đi đường về
           body: RefreshIndicator(
             onRefresh: _loadData,
             child: ListView(
               padding: const EdgeInsets.all(16.0),
-              physics: const AlwaysScrollableScrollPhysics(), // Luôn cho phép cuộn để refresh
+              physics:
+                  const AlwaysScrollableScrollPhysics(), // Luôn cho phép cuộn để refresh
               children: [
-                // Avatar
-                const Center(
-                  child: CircleAvatar(
-                    radius: 50,
-                    backgroundColor: Colors.green,
-                    child: Icon(Icons.person, size: 50, color: Colors.white),
+                const SizedBox(height: 8),
+                // Edit Profile Button (top right)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF2E7D32), Color(0xFF66BB6A)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF2E7D32).withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(12),
+                        onTap: () async {
+                          final result = await Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) =>
+                                  EditProfileScreen(userData: user),
+                            ),
+                          );
+                          if (result == true) _loadData();
+                        },
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 10),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.edit_rounded,
+                                  color: Colors.white, size: 18),
+                              SizedBox(width: 6),
+                              Text(
+                                'Chỉnh sửa',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 16),
+                // Avatar with shadow
+                Center(
+                  child: Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: const Color(0xFF2E7D32).withOpacity(0.3),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                        ),
+                      ],
+                    ),
+                    child: const CircleAvatar(
+                      radius: 60,
+                      backgroundColor: Color(0xFF2E7D32),
+                      child: Icon(Icons.person_rounded,
+                          size: 60, color: Colors.white),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
 
                 // Tên
                 Text(
                   user['full_name'] ?? 'Chưa cập nhật tên',
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF2E7D32),
+                  ),
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: 12),
 
                 // Role
                 Center(
-                  child: Chip(
-                    label: Text(_formatRoles(user['roles'] ?? [])),
-                    backgroundColor: Colors.green.shade100,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF2E7D32), Color(0xFF66BB6A)],
+                      ),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      _formatRoles(user['roles'] ?? []),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ),
-                const Divider(height: 32),
+                const SizedBox(height: 24),
 
                 // 🚀 THẺ ĐIỂM XANH (GAMIFICATION)
                 Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [Colors.teal, Colors.green]),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))],
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF2E7D32), Color(0xFF66BB6A)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF2E7D32).withOpacity(0.4),
+                        blurRadius: 15,
+                        offset: const Offset(0, 8),
+                      ),
+                    ],
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -149,17 +235,27 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                       const Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text("Điểm Xanh Tích Lũy", style: TextStyle(color: Colors.white70, fontSize: 12)),
-                          Text("Green Points", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18)),
+                          Text("Điểm Xanh Tích Lũy",
+                              style: TextStyle(
+                                  color: Colors.white70, fontSize: 12)),
+                          Text("Green Points",
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 18)),
                         ],
                       ),
                       Row(
                         children: [
-                          const Icon(Icons.eco, color: Colors.yellowAccent, size: 32),
+                          const Icon(Icons.eco,
+                              color: Colors.yellowAccent, size: 32),
                           const SizedBox(width: 8),
                           Text(
                             "$points", // 👈 Hiển thị biến points đã fix lỗi
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 32),
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 32),
                           ),
                         ],
                       )
@@ -169,32 +265,85 @@ class _ProfileScreenState extends State<ProfileScreen> with AutomaticKeepAliveCl
                 const SizedBox(height: 20),
 
                 // Thông tin chi tiết
-                Card(
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF2E7D32).withOpacity(0.08),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
                   child: Column(
                     children: [
                       ListTile(
-                        leading: const Icon(Icons.email, color: Colors.blue),
-                        title: const Text('Email'),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        leading: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2E7D32).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.email_rounded,
+                              color: Color(0xFF2E7D32)),
+                        ),
+                        title: const Text('Email',
+                            style: TextStyle(fontWeight: FontWeight.w600)),
                         subtitle: Text(user['email'] ?? '...'),
                       ),
-                      const Divider(height: 1),
+                      Divider(height: 1, color: Colors.grey[200]),
                       ListTile(
-                        leading: const Icon(Icons.phone, color: Colors.green),
-                        title: const Text('Số điện thoại'),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        leading: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2E7D32).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.phone_rounded,
+                              color: Color(0xFF2E7D32)),
+                        ),
+                        title: const Text('Số điện thoại',
+                            style: TextStyle(fontWeight: FontWeight.w600)),
                         subtitle: Text(user['phone_number'] ?? 'Chưa cập nhật'),
                       ),
-                      const Divider(height: 1),
+                      Divider(height: 1, color: Colors.grey[200]),
                       ListTile(
-                        leading: const Icon(Icons.apartment, color: Colors.orange),
-                        title: const Text('Cơ quan / Đơn vị'),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        leading: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2E7D32).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.apartment_rounded,
+                              color: Color(0xFF2E7D32)),
+                        ),
+                        title: const Text('Cơ quan / Đơn vị',
+                            style: TextStyle(fontWeight: FontWeight.w600)),
                         subtitle: Text(user['agency_department'] ?? 'Không có'),
                       ),
-                      const Divider(height: 1),
+                      Divider(height: 1, color: Colors.grey[200]),
                       ListTile(
-                        leading: const Icon(Icons.health_and_safety, color: Colors.redAccent),
-                        title: const Text('Nhóm sức khỏe'),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
+                        leading: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF2E7D32).withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(Icons.health_and_safety_rounded,
+                              color: Color(0xFF2E7D32)),
+                        ),
+                        title: const Text('Nhóm sức khỏe',
+                            style: TextStyle(fontWeight: FontWeight.w600)),
                         subtitle: Text(user['health_group'] ?? 'normal'),
                       ),
                     ],
