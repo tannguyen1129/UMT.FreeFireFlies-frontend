@@ -1,25 +1,26 @@
 /*
  * Copyright 2025 Green-AQI Navigator Team
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Apache License 2.0
  */
 
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:provider/provider.dart';
+import 'package:dio/dio.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:intl/intl.dart';
+
+// Import logic nặng
+import '../../utils/map_heavy_tasks.dart';
+
+// Import Auth Provider
+import '../../../auth/presentation/providers/auth_state_provider.dart';
 
 // Services
 import '../../services/route_planning_service.dart';
@@ -33,13 +34,9 @@ import '../../../../features/incidents/services/incident_service.dart';
 
 // Widgets
 import '../../../profile/presentation/widgets/health_advice_card.dart';
-import 'notification_screen.dart';
-import 'package:flutter/services.dart' show rootBundle;
-import 'package:xml/xml.dart';
-
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({Key? key}) : super(key: key);
+  const HomeScreen({super.key});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -49,1031 +46,943 @@ class _HomeScreenState extends State<HomeScreen> with AutomaticKeepAliveClientMi
   @override
   bool get wantKeepAlive => true;
 
-  // --- Controllers & Services ---
+  // Controllers
   final MapController _mapController = MapController();
   final TextEditingController _startController = TextEditingController(text: "Vị trí của tôi");
   final TextEditingController _endController = TextEditingController();
 
-  final RoutePlanningService _routeService = RoutePlanningService();
-  final GreenSpaceService _greenSpaceService = GreenSpaceService();
-  final ForecastService _forecastService = ForecastService();
-  final SensitiveAreaService _sensitiveService = SensitiveAreaService();
-  final GeocodingService _geocodingService = GeocodingService();
-  final PerceptionService _perceptionService = PerceptionService();
-  final IncidentService _incidentService = IncidentService();
+  // Services
+  final _routeService = RoutePlanningService();
+  final _greenSpaceService = GreenSpaceService();
+  final _forecastService = ForecastService();
+  final _sensitiveService = SensitiveAreaService();
+  final _geocodingService = GeocodingService();
+  final _perceptionService = PerceptionService();
+  final _incidentService = IncidentService();
+  // Dữ liệu đường bao vùng biển chủ quyền (Mô phỏng)
+  final List<Marker> _sovereigntyMarkers = [
+    Marker(
+      point: const LatLng(16.5, 112.0), // Tọa độ Hoàng Sa
+      width: 160, height: 60,
+      child: Column(children: [
+        const Icon(Icons.flag, color: Colors.red, size: 30),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), borderRadius: BorderRadius.circular(4)),
+          child: const Text("HOÀNG SA (VIỆT NAM)", style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.red)),
+        )
+      ]),
+    ),
+    Marker(
+      point: const LatLng(9.0, 113.0), // Tọa độ Trường Sa (Chỉnh lại xíu cho dễ nhìn)
+      width: 160, height: 60,
+      child: Column(children: [
+        const Icon(Icons.flag, color: Colors.red, size: 30),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+          decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), borderRadius: BorderRadius.circular(4)),
+          child: const Text("TRƯỜNG SA (VIỆT NAM)", style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.red)),
+        )
+      ]),
+    ),
+  ];
 
-  // --- State ---
+  // Data
   LatLng? _currentPosition;
   LatLng? _startPoint;
   LatLng? _endPoint;
   double? _distanceKm;
+  String _userHealthGroup = 'normal';
+  double _currentMaxPm25 = 0.0;
 
-  bool _isSettingStart = true;
+  // UI State
   bool _isLoading = false;
+  bool _isMapLoading = true;
   bool _isNavigating = false;
-
   bool _isPickingLocation = false;
+  bool _isSettingStart = true;
 
-  // Trạng thái các lớp (để tô màu nút khi đang bật)
+  // Layers
   bool _layerParks = false;
   bool _layerSensitive = false;
   bool _layerForecast = false;
 
-  String _userHealthGroup = 'normal';
-  double _currentMaxPm25 = 0.0;
-
-  StreamSubscription<Position>? _positionStreamSubscription;
-
-  // --- Map Layers ---
+  // Markers
   List<Polyline> _polylines = [];
   List<Marker> _parkMarkers = [];
   List<Marker> _sensitiveMarkers = [];
   List<Marker> _incidentMarkers = [];
-
-  // Layer cho AQI (Heatmap + Trạm)
   List<CircleMarker> _forecastCircles = [];
   List<Marker> _aqiMarkers = [];
-  List<RemoteMessage> _notifications = [];
   List<Polygon> _hcmcPolygons = [];
-  int _unreadCount = 0;
+
+  StreamSubscription<Position>? _positionStreamSubscription;
+
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        _determinePosition();
-        _fetchForecasts();
-        _fetchUserProfile();
-        _fetchIncidents();
-        _loadKmlPolygon();
+      _initializeData();
+      _startAutoRefresh();
+    });
+  }
 
-        // 🚀 THÊM: Lắng nghe thông báo
-        _setupFCMListener();
+  void _startAutoRefresh() {
+    // Hủy timer cũ nếu có
+    _refreshTimer?.cancel();
+
+    // Tạo timer mới: Cứ 30 giây gọi API 1 lần
+    _refreshTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      if (mounted && _checkAuth() && !_isNavigating) {
+        print("🔄 Auto-refreshing data...");
+        // Gọi thầm lặng (không hiện loading) để trải nghiệm mượt
+        _fetchForecasts();
+        _fetchIncidents();
       }
     });
   }
 
-  // 🚀 HÀM MỚI: Lắng nghe FCM & Tự động Refresh
+  /// 🛡️ INIT DATA AN TOÀN
+  Future<void> _initializeData() async {
+    if (!mounted) return;
+    if (!_checkAuth()) return;
+
+    // 1. Lấy vị trí
+    await _determinePosition();
+
+    // 2. Load KML (Chạy ngầm)
+    if (_checkAuth()) _loadKmlPolygon();
+
+    // 3. Load dữ liệu nhẹ
+    if (_checkAuth()) {
+      _fetchUserProfile();
+      _fetchIncidents();
+    }
+
+    // 4. Load AQI (Nặng) - Delay để UI mượt
+    await Future.delayed(const Duration(milliseconds: 1500));
+
+    if (mounted && _checkAuth()) {
+      _fetchForecasts();
+    }
+
+    _setupFCMListener();
+  }
+
+  bool _checkAuth() {
+    if (!mounted) return false;
+    return Provider.of<AuthStateProvider>(context, listen: false).isAuthenticated;
+  }
+
   void _setupFCMListener() {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-      if (message.notification != null) {
-        if (mounted) {
-          setState(() {
-            // 1. Thêm tin nhắn vào danh sách và tăng số đếm
-            _notifications.insert(0, message);
-            _unreadCount++;
-          });
-
-          // 2. Tự động tải lại dữ liệu (Auto-Fetch)
-          // Khi có tin báo "Cảnh báo ô nhiễm" hoặc "Sự cố đã duyệt", ta load lại map ngay
-          _fetchForecasts();
-          _fetchIncidents();
-
-          // 3. Hiện SnackBar nhỏ thông báo
-          ScaffoldMessenger.of(context).clearSnackBars();
-          ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text("🔔 ${message.notification!.title ?? 'Thông báo mới'}"),
-                behavior: SnackBarBehavior.floating,
-                backgroundColor: Colors.teal,
-                duration: const Duration(seconds: 2),
-                margin: const EdgeInsets.only(top: 10, left: 10, right: 10),
-              )
-          );
-        }
+      if (message.notification != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("🔔 ${message.notification!.title}"), backgroundColor: Colors.teal, duration: const Duration(seconds: 2))
+        );
+        if (_checkAuth()) _fetchIncidents();
       }
     });
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     _stopNavigation(isDisposing: true);
     _mapController.dispose();
     _startController.dispose();
     _endController.dispose();
+    _positionStreamSubscription?.cancel();
     super.dispose();
   }
 
-  void _showSnack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2), margin: const EdgeInsets.only(bottom: 80, left: 10, right: 10)));
-  }
-  Color _getAqiColor(double v) => v<=12?Colors.green:v<=35?Colors.yellow:v<=55?Colors.orange:Colors.red;
-  String _getAqiLevel(double v) => v<=12?"Tốt":v<=35?"Trung bình":v<=55?"Kém":v<=150?"Xấu":"Nguy hại";
-
-  void _updateDistance() {
-    if (_startPoint != null && _endPoint != null) {
-      double d = Geolocator.distanceBetween(_startPoint!.latitude, _startPoint!.longitude, _endPoint!.latitude, _endPoint!.longitude);
-      setState(() => _distanceKm = d / 1000);
-    } else { setState(() => _distanceKm = null); }
-  }
+  // ===============================================================
+  // 🔇 HÀM FETCH ĐÃ ĐƯỢC BỊT MIỆNG LỖI 401 (SILENT CATCH)
+  // ===============================================================
 
   Future<void> _loadKmlPolygon() async {
     try {
-      // 1. Đọc file từ assets
       final kmlString = await rootBundle.loadString('assets/kml/HCMC.kml');
-      final document = XmlDocument.parse(kmlString);
+      final rawPolygons = await compute(parseKmlInBackground, kmlString);
 
-      final polygons = <Polygon>[];
-      final allPoints = <LatLng>[];
+      final polygons = rawPolygons.map((points) => Polygon(
+        points: points,
+        color: Colors.blue.withOpacity(0.05),
+        borderColor: Colors.blue,
+        borderStrokeWidth: 1.5,
+        isFilled: true,
+      )).toList();
 
-      // 2. Tìm tất cả thẻ <Coordinates> hoặc <coordinates>
-      final placemarks = document.findAllElements('Placemark');
+      if (mounted) {
+        setState(() {
+          _hcmcPolygons = polygons;
+          _isMapLoading = false;
+        });
+        if (_currentPosition == null) _mapController.move(const LatLng(10.7769, 106.7009), 12.0);
+      }
+    } catch (e) {
+      if(mounted) setState(() => _isMapLoading = false);
+    }
+  }
 
-      for (var placemark in placemarks) {
-        final coordinatesNode = placemark.findAllElements('coordinates').firstOrNull;
+  Future<void> _fetchForecasts() async {
+    // 1. Kiểm tra quyền
+    if (!_checkAuth()) return;
 
-        if (coordinatesNode != null) {
-          final text = coordinatesNode.innerText.trim();
-          // KML format: long,lat,alt long,lat,alt ... (cách nhau bởi khoảng trắng hoặc xuống dòng)
-          final List<LatLng> points = [];
+    try {
+      final List<dynamic> forecasts = await _forecastService.getAqiForecasts();
+      if (forecasts.isEmpty) return;
 
-          final rawPoints = text.split(RegExp(r'\s+'));
-          for (var raw in rawPoints) {
-            final parts = raw.split(',');
-            if (parts.length >= 2) {
-              final lng = double.tryParse(parts[0]);
-              final lat = double.tryParse(parts[1]);
-              if (lng != null && lat != null) {
-                final p = LatLng(lat, lng);
-                points.add(p);
-                allPoints.add(p);
+      // 2. Tính toán Heatmap (Chạy ngầm để không lag máy)
+      final heatmapData = await compute(computeHeatmapData, forecasts);
+
+      final circles = heatmapData.map((data) {
+        final color = _getAqiColor(data['pm25']);
+        return CircleMarker(
+          point: LatLng(data['lat'], data['lng']),
+          radius: 2000, useRadiusInMeter: true,
+          color: color.withOpacity(0.15),
+          borderColor: Colors.transparent, borderStrokeWidth: 0,
+        );
+      }).toList();
+
+      final markers = <Marker>[];
+      double maxPm = 0.0;
+
+      // 3. Xử lý từng trạm đo
+      for (var f in forecasts) {
+        // --- A. LẤY PM2.5 ---
+        // Tìm key chứa chữ 'PM25' bất kể hoa thường
+        dynamic pm25Val;
+        f.forEach((k, v) {
+          if (k.toString().toLowerCase().contains('pm25')) {
+            pm25Val = v;
+          }
+        });
+
+        // Đào sâu lấy giá trị số
+        double pm25 = 0.0;
+        if (pm25Val is Map) {
+          dynamic inner = pm25Val['value'];
+          if (inner is Map && inner.containsKey('@value')) inner = inner['@value']; // Fix lỗi lồng nhau
+          pm25Val = inner;
+        }
+        if (pm25Val is num) pm25 = pm25Val.toDouble();
+        else if (pm25Val is String) pm25 = double.tryParse(pm25Val) ?? 0.0;
+
+        if (pm25 > maxPm) maxPm = pm25;
+
+        // --- B. LẤY TỌA ĐỘ ---
+        dynamic locData;
+        f.forEach((k, v) {
+          if (k.toString().toLowerCase().contains('location')) locData = v;
+        });
+
+        List<dynamic>? coords;
+        if (locData is Map) {
+          if(locData.containsKey('value')) {
+            dynamic val = locData['value'];
+            if(val is Map && val.containsKey('coordinates')) coords = val['coordinates'];
+            // Trường hợp cấu trúc phẳng
+            else if (val is Map && val.containsKey('@value')) { /* Xử lý nếu cần */ }
+            else if (val is Map && val['type'] == 'Point') coords = val['coordinates'];
+          }
+        }
+
+        if (coords == null || coords.length < 2) continue;
+
+        final pos = LatLng((coords[1] as num).toDouble(), (coords[0] as num).toDouble());
+        final color = _getAqiColor(pm25);
+
+        // --- C. LẤY TÊN TRẠM ---
+        final rawId = f['id'] ?? 'Trạm';
+        final stationName = rawId.toString().split(':').last.replaceAll('OWM-', '');
+
+        // --- D. LẤY THỜI GIAN (QUAN TRỌNG: FIX LỖI 28/11) ---
+        // 3. XỬ LÝ THỜI GIAN (FIX: BẮT BUỘC LẤY VALIDFROM + CHUYỂN MÚI GIỜ)
+        String timeStr = "Đang cập nhật";
+        try {
+          dynamic targetTimeValue;
+
+          // 🔍 BƯỚC 1: Tìm chính xác key chứa 'validFrom' (Dự báo tương lai)
+          // Chúng ta Loop để tìm, thấy là BREAK ngay lập tức.
+          for (var key in f.keys) {
+            if (key.toString().contains('validFrom')) {
+              targetTimeValue = f[key];
+              break; // 🛑 QUAN TRỌNG: Tìm thấy validFrom là dừng, không đi tiếp!
+            }
+          }
+
+          // Fallback: Nếu (rất xui) không có validFrom thì mới lấy observationDateTime
+          if (targetTimeValue == null) {
+            for (var key in f.keys) {
+              if (key.toString().contains('observationDateTime')) {
+                targetTimeValue = f[key];
+                break;
               }
             }
           }
 
-          if (points.isNotEmpty) {
-            polygons.add(Polygon(
-              points: points,
-              color: Colors.blue.withOpacity(0.1), // Màu nền
-              borderColor: Colors.blue,            // Màu viền
-              borderStrokeWidth: 2,
-              isFilled: true,
-            ));
+          // Đào sâu lấy value (xử lý cấu trúc NGSI-LD: value -> @value)
+          if (targetTimeValue is Map) {
+            if (targetTimeValue.containsKey('value')) targetTimeValue = targetTimeValue['value'];
           }
+          if (targetTimeValue is Map) {
+            if (targetTimeValue.containsKey('@value')) targetTimeValue = targetTimeValue['@value'];
+          }
+
+          if (targetTimeValue != null) {
+            String ts = targetTimeValue.toString();
+
+            // 🔍 BƯỚC 2: Xử lý Múi giờ chuẩn xác (UTC -> Local)
+            // Backend Python trả về chuỗi ISO (ví dụ: "2025-12-10T04:30:00") thường là UTC nhưng thiếu chữ 'Z'.
+            // DateTime.parse() của Flutter sẽ mặc định hiểu nhầm đây là giờ Local.
+            // 👉 Ta phải ép nó hiểu đây là UTC trước.
+
+            DateTime utcDate;
+            try {
+              DateTime temp = DateTime.parse(ts);
+              if (!ts.endsWith('Z')) {
+                // Tái tạo lại object nhưng gắn mác là UTC
+                utcDate = DateTime.utc(
+                    temp.year, temp.month, temp.day,
+                    temp.hour, temp.minute, temp.second
+                );
+              } else {
+                utcDate = temp.toUtc();
+              }
+            } catch (_) {
+              utcDate = DateTime.now().toUtc(); // Fallback an toàn
+            }
+
+            // 👉 Chuyển sang giờ Việt Nam (Local Device Time)
+            // Lúc này nó sẽ tự động cộng 7 tiếng (Ví dụ: 04:30 UTC -> 11:30 VN)
+            final vnDate = utcDate.toLocal();
+
+            // Format đẹp: 11:30 10/12
+            timeStr = "${vnDate.hour.toString().padLeft(2, '0')}:${vnDate.minute.toString().padLeft(2, '0')} ${vnDate.day}/${vnDate.month}";
+          }
+        } catch (e) {
+          print("Lỗi parse time: $e");
         }
+
+        markers.add(Marker(
+          point: pos, width: 45, height: 45,
+          child: GestureDetector(
+            // Truyền timeStr vào popup
+            onTap: () => _showStationInfo(stationName, pm25, color, timeStr),
+            child: Icon(Icons.cloud, color: color, size: 35),
+          ),
+        ));
       }
 
-      // 3. Cập nhật UI & Tự động Zoom (Fit Bounds)
-      if (mounted && polygons.isNotEmpty) {
+      if (mounted) {
         setState(() {
-          _hcmcPolygons = polygons;
+          _forecastCircles = circles;
+          _aqiMarkers = markers;
+          _layerForecast = true;
+          _currentMaxPm25 = maxPm;
         });
-
-        // Tự động tính khung bao để zoom vừa khít bản đồ
-        if (allPoints.isNotEmpty) {
-          final bounds = LatLngBounds.fromPoints(allPoints);
-
-          // Fit camera vào bounds (Cần padding để không bị sát lề)
-          _mapController.fitCamera(
-            CameraFit.bounds(
-              bounds: bounds,
-              padding: const EdgeInsets.all(20),
-            ),
-          );
-        }
       }
     } catch (e) {
-      print("Lỗi đọc KML: $e");
+      // Bỏ qua lỗi 401/403 để log sạch
+      if (e is DioException && (e.response?.statusCode == 401 || e.response?.statusCode == 403)) return;
+      print("Lỗi Forecast: $e");
     }
   }
 
   Future<void> _fetchIncidents() async {
+    // Auth Guard: Chưa đăng nhập thì chặn luôn
+    if (!_checkAuth()) return;
+
     try {
-      // Gọi service lấy danh sách sự cố
       final incidents = await _incidentService.getAllIncidents();
+
+      if(!mounted) return;
+
       final markers = <Marker>[];
-
-      for (var inc in incidents) {
+      for(var inc in incidents) {
         final status = inc['status'] ?? 'pending';
-
-        // Lọc: Chỉ hiện những sự cố chưa giải quyết/từ chối
+        // Lọc bớt status đã xong hoặc từ chối
         if (status == 'resolved' || status == 'rejected') continue;
 
         final loc = inc['location'];
-        if (loc == null || loc['coordinates'] == null) continue;
+        if(loc == null || loc['coordinates'] == null) continue;
 
-        // Lấy tọa độ (GeoJSON: [long, lat])
         final lat = (loc['coordinates'][1] as num).toDouble();
         final lng = (loc['coordinates'][0] as num).toDouble();
 
-        // Chọn màu marker theo trạng thái
-        Color color = Colors.red; // Mặc định (Pending)
-        if (status == 'verified') color = Colors.orange;
-        if (status == 'in_progress') color = Colors.blue;
+        Color color = Colors.red; // Mặc định đỏ (nguy hiểm)
+        if(status == 'verified') color = Colors.orange; // Đã xác minh thì cam
 
-        // Tạo Marker hình tam giác cảnh báo
         markers.add(Marker(
-          point: LatLng(lat, lng),
-          width: 40,
-          height: 40,
-          child: GestureDetector(
-            onTap: () {
-              // Hiện popup thông tin khi bấm vào
-              showDialog(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: Row(children: [
-                    Icon(Icons.warning, color: color),
-                    const SizedBox(width: 10),
-                    const Text("Sự cố")
-                  ]),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(inc['incidentType']?['type_name'] ?? 'Sự cố', style: const TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      Text(inc['description'] ?? 'Không có mô tả'),
-                      const SizedBox(height: 8),
-                      Text("Trạng thái: $status", style: TextStyle(color: color, fontStyle: FontStyle.italic)),
-                    ],
-                  ),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Đóng"))
-                  ],
-                ),
-              );
-            },
-            child: Icon(Icons.warning_rounded, color: color, size: 35),
-          ),
+            point: LatLng(lat, lng),
+            width: 35,
+            height: 35,
+            child: GestureDetector(
+                onTap: (){
+                  showDialog(context: context, builder: (ctx)=>AlertDialog(
+                      title: const Text("Sự cố môi trường"),
+                      content: Text(inc['description'] ?? 'Không có mô tả'),
+                      actions: [TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("Đóng"))]
+                  ));
+                },
+                child: Icon(Icons.warning_rounded, color: color, size: 30)
+            )
         ));
       }
 
-      // Cập nhật UI
-      if (mounted) {
-        setState(() {
-          _incidentMarkers = markers;
-        });
-      }
-    } catch (e) {
-      print("Lỗi tải sự cố: $e");
+      setState(() => _incidentMarkers = markers);
+
+    } on DioException catch (e) {
+      // 🔇 IM LẶNG: Nếu là 403 (Không quyền) hoặc 401 (Hết hạn) thì bỏ qua
+      // ApiClient lo logout 401 rồi, còn 403 thì coi như user không xem được sự cố.
+      if (e.response?.statusCode == 403 || e.response?.statusCode == 401) return;
+
+      // Chỉ in log nếu là lỗi khác (ví dụ 500 Server Error)
+      // print("⚠️ Lỗi tải sự cố: ${e.message}");
+    } catch (_) {
+      // Bắt các lỗi linh tinh khác mà không làm crash app
     }
   }
 
   Future<void> _fetchUserProfile() async {
+    if (!_checkAuth()) return;
     try {
-      final profile = await ProfileService().getMyProfile();
-      if (mounted) {
-        setState(() {
-          _userHealthGroup = profile['health_group'] ?? 'normal';
-        });
-        final userId = profile['user_id'];
-        if (userId != null) {
-          await FirebaseMessaging.instance.subscribeToTopic('user_$userId');
-        }
-      }
-    } catch (_) {}
+      final p = await ProfileService().getMyProfile();
+      if(mounted) setState(() => _userHealthGroup = p['health_group'] ?? 'normal');
+    } catch(e) {
+      // 🔇 IM LẶNG
+      if (e is DioException && (e.response?.statusCode == 401)) return;
+    }
   }
+
+  // --- CÁC HÀM KHÁC (GIỮ NGUYÊN) ---
 
   Future<void> _determinePosition() async {
-    if (_isNavigating) return;
-    if (mounted) setState(() => _isLoading = true);
     try {
-      bool s = await Geolocator.isLocationServiceEnabled(); if(!s) throw 'GPS tắt';
-      LocationPermission p = await Geolocator.checkPermission(); if(p==LocationPermission.denied) p=await Geolocator.requestPermission(); if(p==LocationPermission.denied) throw 'Quyền từ chối';
+      bool s = await Geolocator.isLocationServiceEnabled();
+      if(!s) return;
+      LocationPermission p = await Geolocator.checkPermission();
+      if(p==LocationPermission.denied) p=await Geolocator.requestPermission();
+      if(p==LocationPermission.denied || p==LocationPermission.deniedForever) return;
+
       final pos = await Geolocator.getCurrentPosition();
-      if (!mounted) return;
-      setState(() {
-        _currentPosition = LatLng(pos.latitude, pos.longitude);
-        if (_startController.text == "Vị trí của tôi") { _startPoint = _currentPosition; _mapController.move(_currentPosition!, 15.0); }
-        _updateDistance();
-      });
-    } catch (e) { _showSnack('$e'); } finally { if (mounted) setState(() => _isLoading = false); }
+      if(mounted) {
+        setState(() {
+          _currentPosition = LatLng(pos.latitude, pos.longitude);
+          if(_startController.text == "Vị trí của tôi") {
+            _startPoint = _currentPosition;
+            _mapController.move(_currentPosition!, 14.0);
+          }
+          _updateDistance();
+        });
+      }
+    } catch(_){}
   }
 
-  Future<LatLng?> _resolveAddress(String address) async {
-    if (address.trim().isEmpty) return null; if (address == "Vị trí của tôi") return _currentPosition;
-    return await _geocodingService.getCoordinatesFromAddress(address);
-  }
-
-  // ... (Logic Tìm đường) ...
   Future<void> _handleSearchRoute() async {
-    FocusScope.of(context).unfocus(); if(mounted) setState(() => _isLoading = true);
+    FocusScope.of(context).unfocus();
+    if(mounted) setState(() => _isLoading = true);
     try {
-      LatLng? s = await _resolveAddress(_startController.text); if(s==null && _currentPosition==null) await _determinePosition(); s ??= _currentPosition;
-      LatLng? e = await _resolveAddress(_endController.text); if(s==null||e==null) throw "Thiếu địa chỉ";
-      setState(() { _startPoint = s; _endPoint = e; _updateDistance(); });
-      await _fetchAndDrawRoutes(s, e);
-      final b = LatLngBounds.fromPoints([s, e]); _mapController.fitCamera(CameraFit.bounds(bounds: b, padding: const EdgeInsets.all(50)));
-    } catch(e) { _showSnack('$e'); } finally { if(mounted) setState(() => _isLoading = false); }
-  }
+      LatLng? s = _startController.text == "Vị trí của tôi" ? _currentPosition : await _geocodingService.getCoordinatesFromAddress(_startController.text);
+      if(s == null) { await _determinePosition(); s = _currentPosition; }
+      if(s == null) throw "Thiếu điểm đi";
 
-  Future<void> _fetchAndDrawRoutes(LatLng s, LatLng e) async {
-    try { final json = await _routeService.getRecommendedRoutes(s, e); final List f = json['features']??[]; final List<Polyline> r = [];
-    for(var i in f) { final pts = (i['geometry']['coordinates'] as List).map((c)=>LatLng((c[1] as num).toDouble(),(c[0] as num).toDouble())).toList();
-    Color col = Colors.grey; double w = 4.0; if(i['properties']['routeType']=='cleanest'){col=Colors.green;w=6.0;} else if(i['properties']['routeType']=='fastest'){col=Colors.blue;}
-    r.add(Polyline(points: pts, color: col, strokeWidth: w)); } setState(() => _polylines = r); } catch(_){_showSnack("Không tìm thấy đường");}
-  }
+      LatLng? e = await _geocodingService.getCoordinatesFromAddress(_endController.text);
+      if(e == null) throw "Thiếu điểm đến";
 
-  Future<void> _fetchNearbyParks() async {
-    if (_currentPosition == null) {
-      _showSnack("Chưa có vị trí");
-      return;
-    }
-    setState(() {
-      _isLoading = true;
-      _parkMarkers = [];
-    });
-    try {
-      final parks = await _greenSpaceService.findNearbyGreenSpaces(_currentPosition!, 3000);
-      setState(() {
-        _parkMarkers = parks.map((p) {
-          // Lấy tọa độ (GeoJSON Polygon -> Lấy điểm đầu tiên làm mốc)
-          final c = p['location']['value']['coordinates'][0];
-          final pos = LatLng(c[0][1], c[0][0]); // Đảo lat/lng cho đúng
+      setState(() { _startPoint = s; _endPoint = e; });
 
-          // Lấy tên
-          final name = p['name']?['value'] ?? 'Công viên không tên';
+      final json = await _routeService.getRecommendedRoutes(s, e);
+      final List features = json['features'] ?? [];
+      final List<Polyline> lines = [];
+      double totalDistance = 0.0;
 
-          return Marker(
-            point: pos,
-            width: 40,
-            height: 40,
-            child: GestureDetector(
-              onTap: () {
-                // 🔥 HIỆN INFO KHI BẤM VÀO
-                showDialog(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: const Row(children: [
-                      Icon(Icons.park, color: Colors.green),
-                      SizedBox(width: 10),
-                      Text("Không gian xanh", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold))
-                    ]),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(name, style: const TextStyle(fontSize: 16)),
-                        const SizedBox(height: 10),
-                        const Text("Đây là khu vực cây xanh giúp giảm thiểu ô nhiễm và tốt cho sức khỏe.", style: TextStyle(fontSize: 12, color: Colors.grey)),
-                      ],
-                    ),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Đóng")),
-                      // Nút Đi đến đây
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _handleMapTap(pos); // Chọn làm điểm đến
-                        },
-                        icon: const Icon(Icons.directions),
-                        label: const Text("Đi đến đây"),
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white),
-                      )
-                    ],
-                  ),
-                );
-              },
-              child: const Icon(Icons.park, color: Colors.green, size: 35),
-            ),
-          );
-        }).toList();
-        _layerParks = true;
-      });
-      _showSnack('Đã tải ${parks.length} công viên');
-    } catch (e) {
-      _showSnack('Lỗi tải công viên');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
+      for(var f in features) {
+        final coords = f['geometry']['coordinates'] as List;
+        final pts = coords.map((c) => LatLng((c[1] as num).toDouble(), (c[0] as num).toDouble())).toList();
+        final type = f['properties']['routeType'];
 
-  Future<void> _fetchSensitiveAreas() async {
-    if (_currentPosition == null) {
-      _showSnack("Chưa có vị trí");
-      return;
-    }
-    setState(() {
-      _isLoading = true;
-      _sensitiveMarkers = [];
-    });
-    try {
-      final areas = await _sensitiveService.findNearbySensitiveAreas(_currentPosition!, 3000);
-      setState(() {
-        _sensitiveMarkers = areas.map((a) {
-          final c = a['location']['value']['coordinates'][0];
-          final pos = LatLng(c[0][1], c[0][0]);
-
-          final name = a['name']?['value'] ?? 'Địa điểm không tên';
-          final cat = a['category']['value'];
-
-          // Config Icon & Màu & Tiêu đề theo loại
-          IconData icon = Icons.place;
-          Color color = Colors.grey;
-          String typeName = "Khu vực";
-
-          if (cat == 'school' || cat == 'kindergarten') {
-            icon = Icons.school;
-            color = Colors.blue;
-            typeName = "Trường học";
-          } else if (cat == 'hospital') {
-            icon = Icons.local_hospital;
-            color = Colors.redAccent;
-            typeName = "Bệnh viện/Y tế";
-          } else if (cat == 'police') {
-            icon = Icons.local_police;
-            color = Colors.indigo;
-            typeName = "Công an";
-          } else if (cat == 'military') {
-            icon = Icons.shield;
-            color = Colors.brown;
-            typeName = "Quân sự";
-          }
-
-          return Marker(
-            point: pos,
-            width: 40,
-            height: 40,
-            child: GestureDetector(
-              onTap: () {
-                // 🔥 HIỆN INFO KHI BẤM VÀO
-                showDialog(
-                  context: context,
-                  builder: (ctx) => AlertDialog(
-                    title: Row(children: [
-                      Icon(icon, color: color),
-                      const SizedBox(width: 10),
-                      Text(typeName, style: TextStyle(color: color, fontSize: 18, fontWeight: FontWeight.bold))
-                    ]),
-                    content: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-                        const SizedBox(height: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
-                          child: Text(cat.toUpperCase(), style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
-                        ),
-                      ],
-                    ),
-                    actions: [
-                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Đóng")),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _handleMapTap(pos); // Chọn làm điểm đến
-                        },
-                        icon: const Icon(Icons.directions),
-                        label: const Text("Đi đến đây"),
-                        style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white),
-                      )
-                    ],
-                  ),
-                );
-              },
-              child: Icon(icon, color: color, size: 30),
-            ),
-          );
-        }).toList();
-        _layerSensitive = true;
-      });
-      _showSnack('Đã tải ${areas.length} khu vực');
-    } catch (e) {
-      _showSnack('Lỗi tải khu vực nhạy cảm');
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  void _startNavigation() { if(_currentPosition==null)return; setState(() => _isNavigating = true); _positionStreamSubscription = Geolocator.getPositionStream(locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 5)).listen((p){ final np = LatLng(p.latitude, p.longitude); if(mounted){ setState(()=>_currentPosition=np); _mapController.move(np, 18.0); } }); _showSnack('Bắt đầu dẫn đường!'); }
-
-  // ---------------------------------------------------------------------------
-  // <--- CẬP NHẬT: LOGIC GAMIFICATION + DỪNG DẪN ĐƯỜNG
-  // ---------------------------------------------------------------------------
-  void _stopNavigation({bool isDisposing = false}) {
-    _positionStreamSubscription?.cancel();
-    _positionStreamSubscription = null;
-
-    if (!isDisposing && mounted) {
-      setState(() => _isNavigating = false);
-
-      // 🚀 LOGIC GAMIFICATION: TÍNH ĐIỂM
-      if (_distanceKm != null && _distanceKm! > 0) {
-        final int pointsEarned = (_distanceKm! * 10).round(); // 1km = 10 điểm
-
-        if (pointsEarned > 0) {
-          // Gọi API cộng điểm (Lưu ý: Đảm bảo ProfileService có hàm addPoints)
-          ProfileService().addPoints(pointsEarned);
-
-          // Hiện Dialog Chúc mừng
-          showDialog(
-            context: context,
-            builder: (ctx) => AlertDialog(
-              backgroundColor: Colors.green.shade50,
-              title: const Row(children: [Icon(Icons.emoji_events, color: Colors.orange), SizedBox(width: 10), Text("Chuyến đi hoàn tất!")]),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Text("Bạn vừa đóng góp vào việc giảm thiểu khí thải và bảo vệ sức khỏe.", textAlign: TextAlign.center),
-                  const SizedBox(height: 20),
-                  Text("+$pointsEarned Điểm Xanh", style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.green)),
-                  const SizedBox(height: 10),
-                  const Icon(Icons.eco, size: 60, color: Colors.green),
-                ],
-              ),
-              actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text("Tuyệt vời!"))],
-            ),
-          );
-        }
-      }
-
-      if (_currentPosition != null) _mapController.move(_currentPosition!, 15.0);
-    }
-  }
-  // ---------------------------------------------------------------------------
-  void _activatePickMode() {
-    setState(() {
-      _isPickingLocation = true;
-    });
-    _showSnack("Chạm vào bản đồ để chọn điểm đến 📍");
-  }
-
-  void _handleMapTap(LatLng p) {
-    if (_isNavigating) return;
-
-    // Nếu ĐANG ở chế độ chọn điểm -> Thì mới nhận tọa độ
-    if (_isPickingLocation) {
-      setState(() {
-        if (!_isSettingStart) {
-          _endPoint = p;
-          _endController.text = "${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}";
-          _isSettingStart = true;
-        } else {
-          // Mặc định là chọn điểm đến
-          _endPoint = p;
-          _endController.text = "${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}";
-        }
-        _updateDistance();
-
-        // 🚀 Tự động TẮT chế độ chọn sau khi chọn xong (để tránh bấm nhầm lần sau)
-        _isPickingLocation = false;
-      });
-      _showSnack("Đã chọn điểm đến ✅");
-    } else {
-      // Nếu KHÔNG ở chế độ chọn -> Không làm gì cả (để người dùng trượt map thoải mái)
-      // Hoặc có thể dùng để đóng các popup đang mở
-      // print("Tap map ignored (Pick mode off)");
-    }
-  }
-
-  void _clearMap() {
-    setState(() {
-      _polylines = []; _parkMarkers = []; _sensitiveMarkers = []; _incidentMarkers = [];
-      _startPoint = null; _endPoint = null; _distanceKm = null;
-      _startController.text = "Vị trí của tôi"; _endController.clear();
-      _isNavigating = false; _positionStreamSubscription?.cancel();
-      if (_currentPosition != null) _mapController.move(_currentPosition!, 15.0);
-      _layerParks = false; _layerSensitive = false;
-      _isPickingLocation = false; // Reset luôn chế độ chọn
-    });
-    _fetchIncidents();
-    _showSnack('Đã làm mới bản đồ');
-  }
-
-  // ... (Logic Nội suy IDW) ...
-  List<CircleMarker> _generateInterpolatedHeatmap(List<dynamic> sensors) {
-    final List<CircleMarker> heatmapPoints = [];
-    const double minLat = 10.35; const double maxLat = 11.10;
-    const double minLng = 106.30; const double maxLng = 107.00;
-    const double step = 0.015;
-
-    for (double lat = minLat; lat <= maxLat; lat += step) {
-      for (double lng = minLng; lng <= maxLng; lng += step) {
-        double interpolatedPm25 = _calculateIdw(lat, lng, sensors);
-        if (interpolatedPm25 > 0) {
-          final color = _getAqiColor(interpolatedPm25);
-          heatmapPoints.add(CircleMarker(
-            point: LatLng(lat, lng),
-            radius: 1500, useRadiusInMeter: true,
-            color: color.withOpacity(0.15), borderColor: Colors.transparent, borderStrokeWidth: 0,
-          ));
-        }
-      }
-    }
-    return heatmapPoints;
-  }
-
-  double _calculateIdw(double lat, double lng, List<dynamic> sensors) {
-    double num = 0; double den = 0;
-    for (var s in sensors) {
-      final loc = s['location']['value']['coordinates'];
-      final val = (s['forecastedPM25']?['value'] ?? 0.0).toDouble();
-      double d = (lat - loc[1]) * (lat - loc[1]) + (lng - loc[0]) * (lng - loc[0]);
-      if (d == 0) return val;
-      double w = 1 / d; num += val * w; den += w;
-    }
-    return (den != 0) ? (num / den) : 0;
-  }
-
-  // ... (Tải dự báo) ...
-  Future<void> _fetchForecasts() async {
-    if (mounted) setState(() { _isLoading = true; });
-    try {
-      final List<dynamic> forecasts = await _forecastService.getAqiForecasts();
-
-      if (forecasts.isEmpty) return;
-
-      final circles = <CircleMarker>[];
-      final markers = <Marker>[];
-
-      // 🚀 KHAI BÁO BIẾN maxPm TẠI ĐÂY
-      double maxPm = 0.0;
-
-      // 1. Tạo Heatmap nội suy
-      circles.addAll(_generateInterpolatedHeatmap(forecasts));
-
-      // 2. Tạo Marker
-      for (var f in forecasts) {
-        // --- XỬ LÝ PM2.5 ---
-        dynamic pm25Data;
-        for (var key in f.keys) {
-          if (key.toString().contains('forecastedPM25')) {
-            pm25Data = f[key];
-            break;
+        // Tính tổng khoảng cách của tuyến đường chính (cleanest hoặc fastest)
+        if (totalDistance == 0.0) {
+          // Sử dụng hàm tính khoảng cách đường gấp khúc
+          const Distance distance = Distance();
+          for (int i = 0; i < pts.length - 1; i++) {
+            totalDistance += distance.as(LengthUnit.Meter, pts[i], pts[i+1]);
           }
         }
-        final pm25 = (pm25Data?['value'] ?? 0.0).toDouble();
 
-        // 🚀 CẬP NHẬT GIÁ TRỊ MAX
-        if (pm25 > maxPm) maxPm = pm25;
-
-        // --- XỬ LÝ LOCATION ---
-        dynamic locData;
-        for (var key in f.keys) {
-          if (key.toString().contains('location')) {
-            locData = f[key];
-            break;
-          }
-        }
-        final loc = locData?['value']?['coordinates'];
-        if (loc == null) continue;
-
-        // --- XỬ LÝ THỜI GIAN (FIX DỨT ĐIỂM) ---
-        // Thay vì parse từ server, ta lấy giờ hiện tại + 15 phút
-        // Vì đây là dự báo Real-time cho tương lai gần
-        final now = DateTime.now();
-        final forecastTime = now.add(const Duration(minutes: 15));
-
-        String hour = forecastTime.hour.toString().padLeft(2, '0');
-        String minute = forecastTime.minute.toString().padLeft(2, '0');
-        String displayTime = "$hour:$minute"; // Ví dụ: 10:30
-
-        // --- XỬ LÝ TÊN TRẠM ---
-        final rawId = f['id'] ?? '';
-        final stationName = rawId.split(':').last.replaceAll('OWM-', '');
-        final pos = LatLng(loc[1], loc[0]);
-        final color = _getAqiColor(pm25);
-
-        // Vẽ vòng tròn đậm
-        circles.add(CircleMarker(
-            point: pos, radius: 2000, useRadiusInMeter: true,
-            color: color.withOpacity(0.5), borderColor: color, borderStrokeWidth: 2
-        ));
-
-        // Vẽ Marker đám mây
-        markers.add(Marker(
-          point: pos, width: 40, height: 40,
-          child: GestureDetector(
-            onTap: () {
-              showDialog(context: context, builder: (ctx) => AlertDialog(
-                title: Row(children: [
-                  Icon(Icons.wb_cloudy, color: color),
-                  const SizedBox(width: 10),
-                  const Text("Dự báo AI (ST-GNN)", style: TextStyle(color: Colors.black87, fontSize: 18, fontWeight: FontWeight.bold))
-                ]),
-                content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text("Khu vực: $stationName", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  const Divider(),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text("PM2.5:", style: TextStyle(fontSize: 16)),
-                      Text("${pm25.toStringAsFixed(1)} µg/m³", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                    ],
-                  ),
-                  const SizedBox(height: 5),
-                  Row(children: [const Text("Mức độ: "), Text(_getAqiLevel(pm25), style: TextStyle(color: color, fontWeight: FontWeight.bold))]),
-                  const SizedBox(height: 15),
-                  Container(
-                    padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 10),
-                    decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-                    child: Row(children: [
-                      const Icon(Icons.access_time, size: 16, color: Colors.blue),
-                      const SizedBox(width: 5),
-                      Text("Dự báo cho lúc: $displayTime", style: const TextStyle(fontSize: 13, color: Colors.blue, fontWeight: FontWeight.bold)),
-                    ]),
-                  ),
-                ]),
-                actions: [TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text("Đóng"))],
-              ));
-            },
-            child: Icon(Icons.cloud, color: color.withOpacity(1.0), size: 30),
-          ),
+        lines.add(Polyline(
+            points: pts,
+            color: type=='cleanest'?Colors.green:Colors.blue,
+            strokeWidth: type=='cleanest'? 6.0 : 4.0
         ));
       }
 
-      if(mounted) setState(() {
-        _forecastCircles = circles;
-        _aqiMarkers = markers;
-        _layerForecast = true;
-        _currentMaxPm25 = maxPm; // 🚀 CẬP NHẬT BIẾN STATE
+      setState(() {
+        _polylines = lines;
+        _distanceKm = totalDistance / 1000; // Đổi ra km
       });
+
+      final bounds = LatLngBounds.fromPoints([s, e]);
+      _mapController.fitCamera(CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(50)));
 
     } catch(e) {
-      print("Lỗi fetch forecast: $e");
+      if (e is DioException && (e.response?.statusCode == 401 || e.response?.statusCode == 403)) return;
+      _showSnack("Lỗi tìm đường: $e");
     } finally {
-      if(mounted) setState(() { _isLoading = false; });
+      if(mounted) setState(() => _isLoading = false);
     }
   }
 
-  // ... (Cảm nhận) ...
-  void _showPerceptionDialog() {
-    if (_currentPosition == null) { _showSnack('Đang lấy vị trí...'); return; }
-    showDialog(context: context, builder: (ctx) => AlertDialog(
-      title: const Row(children: [Icon(Icons.emoji_emotions, color: Colors.teal), SizedBox(width: 10), Text('Cảm nhận không khí?')]),
-      content: Column(mainAxisSize: MainAxisSize.min, children: [
-        _buildF(ctx, 1, 'Trong lành', Colors.green, Icons.sentiment_very_satisfied),
-        _buildF(ctx, 2, 'Bình thường', Colors.yellow.shade800, Icons.sentiment_neutral),
-        _buildF(ctx, 3, 'Kém', Colors.orange, Icons.sentiment_dissatisfied),
-        _buildF(ctx, 4, 'Ô nhiễm', Colors.red, Icons.masks),
-      ]),
-    ));
-  }
-  Widget _buildF(BuildContext ctx, int l, String t, Color c, IconData i) {
-    return ListTile(leading: Icon(i, color: c, size: 30), title: Text(t, style: TextStyle(color: c, fontWeight: FontWeight.bold)), onTap: () { Navigator.of(ctx).pop(); _submitPerception(l); });
-  }
-  Future<void> _submitPerception(int level) async {
-    if (_currentPosition == null) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    setState(() => _isLoading = true);
-    try {
-      await _perceptionService.submitPerception(location: _currentPosition!, feeling: level);
-      _showSnack('Cảm ơn đóng góp của bạn!');
-    } catch (e) { _showSnack('Lỗi: $e'); } finally { if (mounted) setState(() => _isLoading = false); }
+  void _startNavigation() {
+    if(_currentPosition == null || _polylines.isEmpty) return;
+    setState(() => _isNavigating = true);
+    _showSnack("Bắt đầu dẫn đường!");
+
+    _positionStreamSubscription = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.bestForNavigation, distanceFilter: 10)
+    ).listen((p) {
+      if(mounted) {
+        final np = LatLng(p.latitude, p.longitude);
+        setState(() => _currentPosition = np);
+        _mapController.move(np, 17.0);
+      }
+    });
   }
 
-  // --- Các hàm Toggle Layer khác ---
+  void _stopNavigation({bool isDisposing=false}) {
+    _positionStreamSubscription?.cancel();
+    if(!isDisposing && mounted) {
+      setState(() => _isNavigating = false);
+      if(_distanceKm != null && _distanceKm! > 0.5) {
+        final points = (_distanceKm! * 10).round();
+        try { ProfileService().addPoints(points); } catch(_){}
+
+        showDialog(context: context, builder: (ctx)=>AlertDialog(
+            title: const Text("🎉 Chuyến đi hoàn tất!"),
+            content: Text("Bạn nhận được $points Điểm Xanh vì đã chọn lộ trình sạch."),
+            actions: [TextButton(onPressed: ()=>Navigator.pop(ctx), child: const Text("Tuyệt vời"))]
+        ));
+      }
+      if(_currentPosition!=null) _mapController.move(_currentPosition!, 14.0);
+    }
+  }
+
   Future<void> _toggleParks() async {
-    if (_layerParks) { setState(() { _parkMarkers = []; _layerParks = false; }); }
-    else {
-      if(_currentPosition == null) { _showSnack("Chưa có vị trí"); return; }
+    setState(()=>_layerParks=!_layerParks);
+    if(_layerParks) {
       setState(() => _isLoading = true);
       try {
         final parks = await _greenSpaceService.findNearbyGreenSpaces(_currentPosition!, 3000);
-        setState(() {
-          _parkMarkers = parks.map((p) {
-            final c = p['location']['value']['coordinates'][0];
-            return Marker(point: LatLng(c[0][1], c[0][0]), child: const Icon(Icons.park, color: Colors.green, size: 30));
-          }).toList();
-          _layerParks = true;
-        });
-        _showSnack('Đã hiện ${parks.length} công viên');
-      } catch(_) { _showSnack('Lỗi tải công viên'); } finally { if(mounted) setState(() => _isLoading = false); }
+        setState(() => _parkMarkers = parks.map((p) {
+          // Parse tọa độ (Lấy điểm đầu tiên của Polygon làm mốc)
+          final coords = p['location']['value']['coordinates'];
+          double lat = (coords[0][0][1] as num).toDouble();
+          double lng = (coords[0][0][0] as num).toDouble();
+
+          // Lấy tên công viên
+          final name = p['name']?['value'] ?? 'Công viên xanh';
+
+          return Marker(
+              point: LatLng(lat, lng),
+              width: 45, height: 45,
+              child: GestureDetector(
+                // 👇 Bấm vào thì hiện thông tin + nút chỉ đường
+                  onTap: () => _showPlaceInfo(name, LatLng(lat, lng), Icons.park, Colors.green),
+                  child: const Icon(Icons.park, color: Colors.green, size: 35)
+              )
+          );
+        }).toList());
+        _showSnack("Đã tìm thấy ${parks.length} công viên");
+      } catch(e){
+        if (e is DioException && (e.response?.statusCode == 401 || e.response?.statusCode == 403)) return;
+      } finally { setState(() => _isLoading = false); }
+    } else {
+      setState(() => _parkMarkers = []);
     }
+  }
+
+  void _showPlaceInfo(String name, LatLng location, IconData icon, Color color) {
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+        title: Row(children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 10),
+          Expanded(child: Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)))
+        ]),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Bạn có muốn tìm đường đến địa điểm này không?"),
+            const SizedBox(height: 8),
+            Text("📍 ${location.latitude.toStringAsFixed(4)}, ${location.longitude.toStringAsFixed(4)}",
+                style: const TextStyle(color: Colors.grey, fontSize: 12)),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Đóng")
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
+            icon: const Icon(Icons.directions),
+            label: const Text("Đi đến đây"),
+            onPressed: () {
+              Navigator.pop(ctx); // Đóng dialog
+
+              // 👇 TỰ ĐỘNG ĐIỀN ĐIỂM ĐẾN VÀ TÌM ĐƯỜNG
+              setState(() {
+                _endPoint = location;
+                _endController.text = "${location.latitude}, ${location.longitude}";
+                _isSettingStart = false; // Focus vào ô đích
+              });
+
+              // Gọi hàm tìm đường ngay lập tức
+              _handleSearchRoute();
+            },
+          )
+        ]
+    ));
   }
 
   Future<void> _toggleSensitive() async {
-    if (_layerSensitive) { setState(() { _sensitiveMarkers = []; _layerSensitive = false; }); }
-    else {
-      if(_currentPosition == null) { _showSnack("Chưa có vị trí"); return; }
+    setState(()=>_layerSensitive=!_layerSensitive);
+
+    if(_layerSensitive) {
       setState(() => _isLoading = true);
       try {
         final areas = await _sensitiveService.findNearbySensitiveAreas(_currentPosition!, 3000);
-        setState(() {
-          _sensitiveMarkers = areas.map((a) {
-            final c = a['location']['value']['coordinates'][0];
-            final cat = a['category']['value'];
-            IconData i = Icons.place; Color cl = Colors.grey;
-            if(cat=='school'){i=Icons.school;cl=Colors.blue;} else if(cat=='hospital'){i=Icons.local_hospital;cl=Colors.red;}
-            else if(cat=='police'){i=Icons.local_police;cl=Colors.indigo;} else if(cat=='military'){i=Icons.shield;cl=Colors.brown;}
-            return Marker(point: LatLng(c[0][1], c[0][0]), child: Icon(i, color: cl, size: 30));
-          }).toList();
-          _layerSensitive = true;
-        });
-        _showSnack('Đã hiện ${areas.length} khu vực');
-      } catch(_) { _showSnack('Lỗi tải KV nhạy cảm'); } finally { if(mounted) setState(() => _isLoading = false); }
+
+        setState(() => _sensitiveMarkers = areas.map((a) {
+          // 1. Lấy Tọa độ (Xử lý an toàn cho cả Point và Polygon)
+          final rawLoc = a['location']['value'];
+          List<dynamic> coords;
+
+          // Nếu là Polygon (nhiều lớp ngoặc), lấy điểm đầu tiên làm mốc
+          if (rawLoc['type'] == 'Polygon') {
+            coords = rawLoc['coordinates'][0][0];
+          } else {
+            // Nếu là Point
+            coords = rawLoc['coordinates'];
+          }
+
+          double lat = (coords[1] as num).toDouble();
+          double lng = (coords[0] as num).toDouble();
+
+          // 2. Lấy Tên địa điểm (New!)
+          String name = 'Khu vực nhạy cảm';
+          if (a.containsKey('name')) {
+            name = a['name']['value'] ?? name;
+          }
+
+          // 3. Phân loại Icon & Màu sắc
+          final cat = a['category']['value'];
+          IconData icon = Icons.place;
+          Color color = Colors.grey;
+
+          if (cat == 'school') {
+            icon = Icons.school;
+            color = Colors.blue;
+          } else if (cat == 'hospital') {
+            icon = Icons.local_hospital;
+            color = Colors.redAccent;
+          }
+
+          return Marker(
+              point: LatLng(lat, lng),
+              width: 45, height: 45,
+              child: GestureDetector(
+                // 👇 Bấm vào hiển thị Tên + Nút đi đến
+                  onTap: () => _showPlaceInfo(name, LatLng(lat, lng), icon, color),
+                  child: Icon(icon, color: color, size: 35)
+              )
+          );
+        }).toList());
+
+        _showSnack("Đã tìm thấy ${areas.length} khu vực nhạy cảm");
+
+      } catch(e){
+        // Im lặng với lỗi Auth
+        if (e is DioException && (e.response?.statusCode == 401 || e.response?.statusCode == 403)) return;
+        print("Lỗi Sensitive: $e");
+      } finally {
+        setState(() => _isLoading = false);
+      }
+    } else {
+      setState(() => _sensitiveMarkers = []);
     }
   }
 
-  // ===============================================================
-  // 🖥️ GIAO DIỆN (UI)
-  // ===============================================================
-  @override
-  Widget build(BuildContext context) {
-    super.build(context);
+  void _showPerceptionDialog() {
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text("Cảm nhận không khí"),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        ListTile(leading: const Icon(Icons.sentiment_very_satisfied, color: Colors.green), title: const Text("Trong lành"), onTap: () => _submitPerception(1, ctx)),
+        ListTile(leading: const Icon(Icons.sentiment_neutral, color: Colors.orange), title: const Text("Bình thường"), onTap: () => _submitPerception(2, ctx)),
+        ListTile(leading: const Icon(Icons.sentiment_very_dissatisfied, color: Colors.red), title: const Text("Ô nhiễm"), onTap: () => _submitPerception(3, ctx)),
+      ]),
+    ));
+  }
 
-    final allMarkers = <Marker>[];
-    if (_currentPosition != null) {
-      allMarkers.add(Marker(
-        point: _currentPosition!,
-        child: _isNavigating
-            ? const Icon(Icons.navigation, color: Colors.blue, size: 40.0)
-            : const Icon(Icons.my_location, color: Colors.blue, size: 30.0),
-      ));
+  Future<void> _submitPerception(int level, BuildContext dialogContext) async {
+    Navigator.pop(dialogContext);
+    if(_currentPosition == null) return;
+    try {
+      await _perceptionService.submitPerception(location: _currentPosition!, feeling: level);
+      _showSnack("Cảm ơn đóng góp của bạn!");
+    } catch(e) {
+      if (e is DioException && e.response?.statusCode == 401) return;
+      _showSnack("Lỗi: $e");
     }
-    if (_startPoint != null && _startPoint != _currentPosition) allMarkers.add(Marker(point: _startPoint!, width: 80, height: 80, child: const Column(children: [Icon(Icons.trip_origin, color: Colors.green, size: 35), Text("Bắt đầu", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))])));
-    if (_endPoint != null) allMarkers.add(Marker(point: _endPoint!, width: 80, height: 80, child: const Column(children: [Icon(Icons.location_on, color: Colors.red, size: 35), Text("Đến", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))])));
+  }
 
-    allMarkers.addAll(_parkMarkers);
-    allMarkers.addAll(_sensitiveMarkers);
-    if (_layerForecast) allMarkers.addAll(_aqiMarkers);
-
-    return Scaffold(
-      resizeToAvoidBottomInset: false,
-      body: Stack(
-        children: [
-          // 1. BẢN ĐỒ
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: const LatLng(10.7769, 106.7009),
-              initialZoom: 14.0,
-              onTap: (_, point) => _handleMapTap(point),
+  void _showStationInfo(String name, double pm25, Color color, String time) {
+    showDialog(context: context, builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.location_on, color: color),
+            const SizedBox(width: 8),
+            Expanded(child: Text(name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
+          ],
+        ),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          // 1. Phần hiển thị chỉ số
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
             ),
-            children: [
-              TileLayer(urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.example.frontend_citizen',
-              ),
-
-              PolygonLayer(polygons: _hcmcPolygons),
-
-              if (_layerForecast) CircleLayer(circles: _forecastCircles),
-              PolylineLayer(polylines: _polylines),
-              MarkerLayer(markers: allMarkers),
-            ],
-          ),
-
-          // 2. THANH TÌM KIẾM (NỔI) + CHUÔNG
-          if (!_isNavigating)
-            Positioned(
-              top: 50, left: 16, right: 16,
-              child: Column(
-                children: [
-                  Card(
-                    elevation: 6,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    child: Column(
-                      children: [
-                        // Hàng chứa: Các ô Input (Trái) + Nút Chuông (Phải)
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // Phần Input (Chiếm phần lớn diện tích)
-                            Expanded(
-                              child: Column(
-                                children: [
-                                  // Ô Điểm đi
-                                  ListTile(
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                                    leading: const Icon(Icons.my_location, color: Colors.green, size: 20),
-                                    title: TextField(
-                                      controller: _startController,
-                                      decoration: const InputDecoration(hintText: "Chọn điểm đi", border: InputBorder.none, isDense: true),
-                                      style: const TextStyle(fontSize: 14),
-                                      onTap: () => setState(() => _isSettingStart = true),
-                                    ),
-                                    trailing: IconButton(icon: const Icon(Icons.close, size: 18), onPressed: () => _startController.text = "Vị trí của tôi"),
-                                    dense: true,
-                                  ),
-                                  const Divider(height: 1, indent: 16, endIndent: 16),
-                                  // Ô Điểm đến
-                                  ListTile(
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
-                                    leading: const Icon(Icons.location_on, color: Colors.red, size: 20),
-                                    title: TextField(
-                                      controller: _endController,
-                                      decoration: const InputDecoration(hintText: "Nhập điểm đến...", border: InputBorder.none, isDense: true),
-                                      style: const TextStyle(fontSize: 14),
-                                      onTap: () => setState(() => _isSettingStart = false),
-                                      onSubmitted: (_) => _handleSearchRoute(),
-                                    ),
-                                    trailing: IconButton(icon: const Icon(Icons.search, color: Colors.blue), onPressed: _handleSearchRoute),
-                                    dense: true,
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-
-                  // (Giữ nguyên phần hiển thị khoảng cách và thẻ sức khỏe bên dưới Card)
-                  if (_distanceKm != null)
-                    Container(
-                        margin: const EdgeInsets.only(top: 8),
-                        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
-                        decoration: BoxDecoration(color: Colors.blue.shade600, borderRadius: BorderRadius.circular(20), boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)]),
-                        child: Text("${_distanceKm!.toStringAsFixed(2)} km", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))
-                    ),
-
-                  if (_layerForecast && _currentMaxPm25 > 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: HealthAdviceCard(pm25: _currentMaxPm25, userHealthGroup: _userHealthGroup),
-                    ),
-                ],
-              ),
-            ),
-
-          // 3. CÁC NÚT CHỨC NĂNG
-          Positioned(
-            bottom: 100,
-            right: 16,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                // 🚀 NÚT ZOOM IN (+)
-                _buildCircleBtn(Icons.add, () {
-                  final currentZoom = _mapController.camera.zoom;
-                  _mapController.move(_mapController.camera.center, currentZoom + 1);
-                }, color: Colors.white),
-                const SizedBox(height: 10),
-
-                // 🚀 NÚT ZOOM OUT (-)
-                _buildCircleBtn(Icons.remove, () {
-                  final currentZoom = _mapController.camera.zoom;
-                  _mapController.move(_mapController.camera.center, currentZoom - 1);
-                }, color: Colors.white),
-                const SizedBox(height: 10),
-
-                // --- CÁC NÚT CŨ ---
-                _buildCircleBtn(Icons.refresh, () => _clearMap(), color: Colors.white),
-                const SizedBox(height: 10),
-
-                _buildCircleBtn(Icons.gps_fixed, () => _determinePosition(), color: Colors.white, iconColor: Colors.blue),
-                const SizedBox(height: 10),
-
-                // NÚT CẮM MỐC
-                _buildCircleBtn(
-                    _isPickingLocation ? Icons.location_off : Icons.add_location_alt,
-                        () => _activatePickMode(),
-                    color: _isPickingLocation ? Colors.orange : Colors.white,
-                    iconColor: _isPickingLocation ? Colors.white : Colors.black87
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("Chỉ số PM2.5", style: TextStyle(color: Colors.grey, fontSize: 12)),
+                    Text("${pm25.toStringAsFixed(1)}", style: TextStyle(color: color, fontSize: 32, fontWeight: FontWeight.w900)),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
+                  child: Text(_getAqiLevel(pm25), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                 ),
               ],
             ),
           ),
 
-          // 4. BOTTOM SHEET
-          if (!_isNavigating)
-            Positioned(
-              bottom: 16, left: 16, right: 16,
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _buildFilterChip("Công viên", Icons.park, Colors.green, _layerParks, _toggleParks),
-                    const SizedBox(width: 8),
-                    _buildFilterChip("Y tế/Giáo dục", Icons.local_hospital, Colors.redAccent, _layerSensitive, _toggleSensitive),
-                    const SizedBox(width: 8),
-                    _buildFilterChip("Cảm nhận", Icons.emoji_emotions, Colors.teal, false, _showPerceptionDialog),
-                    const SizedBox(width: 8),
-                    _buildFilterChip("Dự báo AQI", Icons.cloud, Colors.orange, _layerForecast, _fetchForecasts),
-                  ],
+          const SizedBox(height: 16),
+
+          // 2. 👇 PHẦN HIỂN THỊ DỰ BÁO AI (QUAN TRỌNG)
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+                color: Colors.blueAccent.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blueAccent.withOpacity(0.3), width: 1)
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Icon AI đang hoạt động
+                const Icon(Icons.psychology, color: Colors.blueAccent, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("DỰ BÁO SỚM (30 PHÚT)",
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blueAccent, letterSpacing: 0.5)),
+                      const SizedBox(height: 2),
+                      Text("Khung giờ: $time",
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black87)),
+                      const SizedBox(height: 4),
+                      const Text("Dữ liệu được AI phân tích từ mạng lưới quan trắc thời gian thực.",
+                          style: TextStyle(fontSize: 11, color: Colors.grey, fontStyle: FontStyle.italic)),
+                    ],
+                  ),
                 ),
+              ],
+            ),
+          ),
+        ]),
+        actions: [
+          TextButton(
+              onPressed: ()=>Navigator.pop(ctx),
+              style: TextButton.styleFrom(foregroundColor: Colors.grey),
+              child: const Text("Đóng")
+          ),
+          ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                // Có thể thêm hành động: Xem chi tiết / Báo cáo
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: color, foregroundColor: Colors.white),
+              child: const Text("Xem chi tiết")
+          )
+        ]
+    ));
+  }
+
+  Color _getAqiColor(double v) => v<=12?Colors.green:v<=35?Colors.yellow.shade700:v<=55?Colors.orange:Colors.red;
+  String _getAqiLevel(double v) => v<=12?"Tốt":v<=35?"Trung bình":v<=55?"Kém":v<=150?"Xấu":"Nguy hại";
+  void _showSnack(String m) { if(mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m), behavior: SnackBarBehavior.floating, duration: const Duration(seconds: 2))); }
+
+  void _updateDistance() {
+    if (_startPoint != null && _endPoint != null) {
+      final d = Geolocator.distanceBetween(_startPoint!.latitude, _startPoint!.longitude, _endPoint!.latitude, _endPoint!.longitude);
+      setState(() => _distanceKm = d/1000);
+    }
+  }
+
+  void _activatePickMode() {
+    setState(() => _isPickingLocation = true);
+    _showSnack("Chạm vào bản đồ để chọn điểm đến 📍");
+  }
+
+  void _clearMap() {
+    setState(() {
+      _polylines=[]; _parkMarkers=[]; _sensitiveMarkers=[]; _incidentMarkers=[]; _forecastCircles=[]; _aqiMarkers=[];
+      _startPoint=null; _endPoint=null; _distanceKm=null; _startController.text="Vị trí của tôi"; _endController.clear();
+      _isNavigating=false; _layerParks=false; _layerSensitive=false; _layerForecast=false; _isPickingLocation=false;
+    });
+    _determinePosition();
+  }
+
+  void _handleMapTap(LatLng p) {
+    if (_isNavigating) return;
+    if (_isPickingLocation) {
+      setState(() {
+        _endPoint = p;
+        _endController.text = "${p.latitude.toStringAsFixed(4)}, ${p.longitude.toStringAsFixed(4)}";
+        _isPickingLocation = false;
+        if (!_isSettingStart) _isSettingStart = true;
+        _updateDistance();
+      });
+      _showSnack("Đã chọn điểm đến ✅");
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+
+    final allMarkers = [
+      if(_currentPosition != null) Marker(point: _currentPosition!, child: Icon(_isNavigating ? Icons.navigation : Icons.my_location, color: Colors.blue, size: 30)),
+      if(_startPoint != null && _startPoint != _currentPosition) Marker(point: _startPoint!, width: 80, height: 80, child: const Column(children: [Icon(Icons.trip_origin, color: Colors.green, size: 35), Text("Bắt đầu", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))])),
+      if(_endPoint != null) Marker(point: _endPoint!, width: 80, height: 80, child: const Column(children: [Icon(Icons.location_on, color: Colors.red, size: 35), Text("Đến", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12))])),
+      ..._parkMarkers, ..._sensitiveMarkers, ..._aqiMarkers, ..._incidentMarkers
+    ];
+
+    return Scaffold(
+        resizeToAvoidBottomInset: false,
+        body: Stack(
+          children: [
+            FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: const LatLng(10.7769, 106.7009),
+                initialZoom: 13.0,
+                onTap: (_, p) => _handleMapTap(p),
               ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  tileProvider: NetworkTileProvider(
+                    headers: {
+                      'User-Agent': 'com.example.frontend_citizen',
+                    },
+                  ),
+                ),
+
+                // Vùng HCM (Giữ nguyên)
+                if (!_isMapLoading) PolygonLayer(polygons: _hcmcPolygons),
+
+                // Lớp Dự báo (Giữ nguyên)
+                if (_layerForecast) CircleLayer(circles: _forecastCircles),
+
+                // Đường đi (Giữ nguyên)
+                PolylineLayer(polylines: _polylines),
+
+                // MARKER: Gộp marker thường + Marker Cờ Tổ Quốc
+                MarkerLayer(markers: [
+                  ...allMarkers,
+                  ..._sovereigntyMarkers, // 👈 Chỉ thêm đúng dòng này là có cờ
+                ]),
+              ],
             ),
 
-          // 5. NÚT DẪN ĐƯỜNG
-          if (_polylines.isNotEmpty && !_isNavigating)
-            Positioned(bottom: 80, left: 16, right: 16, child: SizedBox(height: 50, child: ElevatedButton.icon(onPressed: _startNavigation, icon: const Icon(Icons.directions), label: const Text("BẮT ĐẦU ĐI (TUYẾN ĐƯỜNG XANH)"), style: ElevatedButton.styleFrom(backgroundColor: Colors.green[700], foregroundColor: Colors.white)))),
+            // --- CÁC WIDGET GIAO DIỆN KHÁC GIỮ NGUYÊN ---
+            if (_isLoading || _isMapLoading) const Positioned(top: 0, left: 0, right: 0, child: LinearProgressIndicator(color: Colors.green, minHeight: 4)),
 
-          if (_isNavigating)
-            Positioned(bottom: 30, left: 16, right: 16, child: Card(color: Colors.white, child: Padding(padding: const EdgeInsets.all(16.0), child: Row(children: [const Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [Text("Đang dẫn đường...", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)), Text("Đi theo tuyến đường xanh lá", style: TextStyle(color: Colors.grey, fontSize: 12))]), const Spacer(), ElevatedButton.icon(onPressed: () => _stopNavigation(), icon: const Icon(Icons.stop), label: const Text("Dừng"), style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white))])))),
+            if (!_isNavigating) Positioned(top: 50, left: 16, right: 16, child: Column(children: [
+              _buildSearchBar(),
+              if(_layerForecast && _currentMaxPm25 > 0) Padding(padding: const EdgeInsets.only(top:8), child: HealthAdviceCard(pm25: _currentMaxPm25, userHealthGroup: _userHealthGroup))
+            ])),
 
-          if (_isLoading) Container(color: Colors.black12, child: const Center(child: CircularProgressIndicator())),
-        ],
+            if (!_isNavigating) ...[
+              Positioned(bottom: 100, right: 16, child: _buildRightButtons()),
+              Positioned(bottom: 16, left: 16, right: 16, child: _buildBottomFilter()),
+            ],
+
+            if (_polylines.isNotEmpty && !_isNavigating) Positioned(bottom: 80, left: 40, right: 40, child: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 12)),
+                onPressed: _startNavigation, child: const Text("BẮT ĐẦU ĐI", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16))
+            )),
+
+            if (_isNavigating) Positioned(bottom: 30, right: 16, child: FloatingActionButton(onPressed: () => _stopNavigation(), backgroundColor: Colors.red, child: const Icon(Icons.stop, color: Colors.white))),
+          ],
+        )
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Card(child: Column(children: [
+      ListTile(
+          dense: true, leading: const Icon(Icons.my_location, color: Colors.green),
+          title: TextField(controller: _startController, onTap: ()=>setState(()=>_isSettingStart=true), decoration: const InputDecoration(border: InputBorder.none, hintText: "Điểm đi")),
+          trailing: IconButton(icon: const Icon(Icons.close), onPressed: ()=>setState(()=>_startController.text="Vị trí của tôi"))
       ),
-    );
+      const Divider(height: 1),
+      ListTile(
+          dense: true, leading: const Icon(Icons.location_on, color: Colors.red),
+          title: TextField(controller: _endController, onTap: ()=>setState(()=>_isSettingStart=false), onSubmitted: (_)=>_handleSearchRoute(), decoration: const InputDecoration(border: InputBorder.none, hintText: "Điểm đến")),
+          trailing: IconButton(icon: const Icon(Icons.search, color: Colors.blue), onPressed: _handleSearchRoute)
+      )
+    ]));
   }
 
-  Widget _buildCircleBtn(IconData icon, VoidCallback onTap, {Color color = Colors.white, Color iconColor = Colors.black87}) {
-    return Material(elevation: 4, shape: const CircleBorder(), color: color, child: InkWell(onTap: onTap, customBorder: const CircleBorder(), child: Padding(padding: const EdgeInsets.all(12.0), child: Icon(icon, color: iconColor, size: 24))));
+  Widget _buildRightButtons() {
+    return Column(children: [
+      FloatingActionButton(mini: true, heroTag: "z1", backgroundColor: Colors.white, onPressed: (){ _mapController.move(_mapController.camera.center, _mapController.camera.zoom + 1); }, child: const Icon(Icons.add, color: Colors.black)),
+      const SizedBox(height: 10),
+      FloatingActionButton(mini: true, heroTag: "z2", backgroundColor: Colors.white, onPressed: (){ _mapController.move(_mapController.camera.center, _mapController.camera.zoom - 1); }, child: const Icon(Icons.remove, color: Colors.black)),
+      const SizedBox(height: 10),
+      FloatingActionButton(mini: true, heroTag: "gps", backgroundColor: Colors.white, onPressed: _determinePosition, child: const Icon(Icons.gps_fixed, color: Colors.blue)),
+      const SizedBox(height: 10),
+      FloatingActionButton(mini: true, heroTag: "pick", backgroundColor: _isPickingLocation?Colors.orange:Colors.white, onPressed: _activatePickMode, child: const Icon(Icons.add_location_alt, color: Colors.black)),
+      const SizedBox(height: 10),
+      FloatingActionButton(mini: true, heroTag: "refresh", backgroundColor: Colors.white, onPressed: _clearMap, child: const Icon(Icons.refresh, color: Colors.black)),
+    ]);
   }
 
-  Widget _buildFilterChip(String label, IconData icon, Color color, bool isActive, VoidCallback onTap) {
-    return FilterChip(
-      label: Row(children: [Icon(icon, size: 18, color: isActive ? Colors.white : color), const SizedBox(width: 6), Text(label)]),
-      selected: isActive,
-      onSelected: (_) => onTap(),
-      selectedColor: color,
-      checkmarkColor: Colors.white,
-      labelStyle: TextStyle(color: isActive ? Colors.white : Colors.black87, fontWeight: isActive ? FontWeight.bold : FontWeight.normal),
-      backgroundColor: Colors.white,
-      elevation: 2,
-      side: BorderSide.none,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-    );
+  Widget _buildBottomFilter() {
+    return SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: [
+      _chip("AQI", Icons.cloud, Colors.orange, _layerForecast, _fetchForecasts), const SizedBox(width: 8),
+      _chip("Công viên", Icons.park, Colors.green, _layerParks, _toggleParks), const SizedBox(width: 8),
+      _chip("Nhạy cảm", Icons.local_hospital, Colors.red, _layerSensitive, _toggleSensitive), const SizedBox(width: 8),
+      _chip("Cảm nhận", Icons.emoji_emotions, Colors.teal, false, _showPerceptionDialog),
+    ]));
   }
 
-  Widget _buildLegendItem(Color color, String text) { return Container(); }
+  Widget _chip(String l, IconData i, Color c, bool a, VoidCallback t) {
+    return FilterChip(label: Row(children: [Icon(i, size: 16, color: a?Colors.white:c), const SizedBox(width: 4), Text(l)]), selected: a, onSelected: (_)=>t(), selectedColor: c, checkmarkColor: Colors.white, backgroundColor: Colors.white);
+  }
 }

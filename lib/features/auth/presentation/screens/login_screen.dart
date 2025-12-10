@@ -53,7 +53,7 @@ class _LoginScreenState extends State<LoginScreen> {
       );
 
       if (!mounted) return;
-      authProvider.loginSuccess(token);
+      authProvider.loginSuccess();
 
       // Hiển thị SnackBar sau khi điều hướng
       Future.microtask(() {

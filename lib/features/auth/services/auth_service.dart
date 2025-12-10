@@ -96,4 +96,16 @@ class AuthService {
       await _storageService.deleteToken();
     }
   }
+
+  Future<dynamic> getProfile() async {
+    try {
+      // Gọi API lấy thông tin user (API này yêu cầu Token)
+      // Nếu Token hết hạn, Server sẽ trả về 401 -> Dio ném lỗi
+      final response = await _apiClient.dio.get('/users/me');
+      return response.data;
+    } catch (e) {
+      // Ném lỗi tiếp để Provider bắt được
+      rethrow;
+    }
+  }
 }
